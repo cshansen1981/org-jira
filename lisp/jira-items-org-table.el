@@ -10,6 +10,15 @@
 (require 'jira-items-api)
 (require 'jira-items-query)
 
+(defun jira--org-escape (string &optional brackets)
+  "Escape STRING so it can be used inside an Org table cell.
+Pipes become \\vert.  If BRACKETS is non-nil, square brackets are
+replaced by braces so the text is safe inside an Org link description."
+  (replace-regexp-in-string
+   (if brackets "[]|[]" "|")
+   (lambda (x) (pcase x ("|" "\\vert") ("[" "{") ("]" "}")))
+   string t t))
+
 (defun jira-insert-org-table-open-items ()
   "Insert an Org table with open Jira items at point.
 The table has one column titled 'Jira' containing item titles (key: summary)."
@@ -28,7 +37,7 @@ The table has one column titled 'Jira' containing item titles (key: summary)."
             (let* ((key (alist-get 'key issue))
                    (summary (alist-get 'summary (alist-get 'fields issue)))
                    ;; Escape pipe characters in summary to avoid breaking the table
-                   (escaped-summary (replace-regexp-in-string "|" "\\vert" summary))
+                   (escaped-summary (jira--org-escape summary))
                    (title (format "%s: %s" key escaped-summary)))
               (insert (format "| %s |\n" title))))
           ;; Align the table
@@ -56,7 +65,7 @@ The table includes columns for Key, Summary, Status, and Priority."
                    (fields (alist-get 'fields issue))
                    (summary (alist-get 'summary fields))
                    ;; Escape pipe characters
-                   (escaped-summary (replace-regexp-in-string "|" "\\vert" summary))
+                   (escaped-summary (jira--org-escape summary))
                    ;; Truncate summary if too long
                    (truncated-summary (if (> (length escaped-summary) 50)
                                           (concat (substring escaped-summary 0 47) "...")
@@ -97,7 +106,7 @@ Prompts for which statuses to include or exclude."
                      (summary (alist-get 'summary fields))
                      (status (alist-get 'name (alist-get 'status fields)))
                      ;; Escape pipe characters
-                     (escaped-summary (replace-regexp-in-string "|" "\\vert" summary))
+                     (escaped-summary (jira--org-escape summary))
                      (title (format "%s: %s" key escaped-summary)))
                 (insert (format "| %s | %s |\n" title status))))
             ;; Align the table
@@ -124,12 +133,7 @@ Each item becomes a link to the Jira issue."
             (let* ((key (alist-get 'key issue))
                    (summary (alist-get 'summary (alist-get 'fields issue)))
                    ;; Escape pipe and bracket characters
-                   (escaped-summary (replace-regexp-in-string
-                                     "[]|[]"
-                                     (lambda (x) (cond ((string= x "|") "\\vert")
-                                                       ((string= x "[") "{")
-                                                       ((string= x "]") "}")))
-                                     summary))
+                   (escaped-summary (jira--org-escape summary t))
                    (url (format "%s/browse/%s" jira-base-url key))
                    (link (format "[[%s][%s: %s]]" url key escaped-summary)))
               (insert (format "| %s |\n" link))))
