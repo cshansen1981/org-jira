@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal fake Jira Server used by the HTTP tests.
 
-Serves POST .../issue/KEY/worklog (echoing the body back), /rest/api/2/myself and /rest/api/2/search (with real startAt /
+Serves POST /rest/api/2/issue and .../issue/KEY/worklog (echoing the body back), /rest/api/2/field, /rest/api/2/myself and /rest/api/2/search (with real startAt /
 maxResults paging over five fixture issues) and requires the header
 "Authorization: Bearer <TOKEN>".  Binds to an ephemeral port and prints
 "PORT <n>" on stdout once it is listening.
@@ -57,6 +57,12 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
         if url.path == "/rest/api/2/myself":
             return self._send(200, {"displayName": "Søren Åberg", "name": "soren"})
+        if url.path == "/rest/api/2/field":
+            return self._send(200, [
+                {"id": "summary", "name": "Summary", "custom": False},
+                {"id": "customfield_10777", "name": "Epic Link", "custom": True,
+                 "schema": {"custom": "com.pyxis.greenhopper.jira:gh-epic-link"}},
+            ])
         if url.path == "/rest/api/2/search":
             start = int(qs.get("startAt", ["0"])[0])
             size = int(qs.get("maxResults", ["50"])[0])
@@ -74,6 +80,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, {"errorMessages": ["Unauthorized"]})
         url = urlparse(self.path)
         parts = url.path.strip("/").split("/")
+        if parts == ["rest", "api", "2", "issue"]:
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = json.loads(raw.decode("utf-8"))
+            return self._send(201, {"id": "9", "key": "TST-99", "received": body})
         if parts[:4] == ["rest", "api", "2", "issue"] and parts[-1] == "worklog":
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             if "json" not in (self.headers.get("Content-Type") or ""):

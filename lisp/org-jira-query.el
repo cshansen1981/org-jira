@@ -20,8 +20,8 @@ MAX-RESULTS is the maximum number of results (default `jira-max-results')."
                            encoded-jql start max)))
     (org-jira-api-request endpoint)))
 
-(defun org-jira-query-get-all-assigned-items-with-jql (jql)
-  "Get all Jira items using a specific JQL query, following pagination."
+(defun org-jira-query-get-issues-with-jql (jql)
+  "Get all Jira issues matching JQL, following pagination."
   (let ((all-issues '())
         (start-at 0)
         (total nil))
@@ -52,9 +52,20 @@ MAX-RESULTS is the maximum number of results (default `jira-max-results')."
 (defun org-jira-query-get-open-items (&optional username)
   "Get open Jira items assigned to current user or USERNAME.
 Open items are those not in 'Done', 'Closed', or 'Resolved' status."
-  (org-jira-query-get-all-assigned-items-with-jql
+  (org-jira-query-get-issues-with-jql
    (format "%s AND status NOT IN (Done, Closed, Resolved) ORDER BY priority DESC, updated DESC"
            (org-jira-query--assignee-clause username))))
+
+(defun org-jira-query-get-epics (&optional projects)
+  "Get open Epics in PROJECTS (default `jira-epic-projects').
+PROJECTS is a list of project names or keys.  Open Epics are those not
+in \='Done\=', \='Closed\=', or \='Resolved\=' status."
+  (let ((projects (or projects jira-epic-projects)))
+    (unless projects
+      (user-error "No projects configured in `jira-epic-projects'"))
+    (org-jira-query-get-issues-with-jql
+     (format "project IN (%s) AND issuetype = Epic AND status NOT IN (Done, Closed, Resolved) ORDER BY project, key"
+             (mapconcat (lambda (p) (format "'%s'" p)) projects ", ")))))
 
 (provide 'org-jira-query)
 

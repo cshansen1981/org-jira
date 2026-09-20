@@ -24,6 +24,25 @@
   :type 'integer
   :group 'org-jira)
 
+(defcustom jira-epic-projects '("Rezilient" "SITE")
+  "Jira projects (names or keys) whose Epics are listed by
+`org-jira-insert-epics'."
+  :type '(repeat string)
+  :group 'org-jira)
+
+(defcustom jira-task-issue-type "Task"
+  "Name of the Jira issue type used when creating tasks.
+Change this if your instance names it differently (for example a
+translated name)."
+  :type 'string
+  :group 'org-jira)
+
+(defcustom jira-epic-link-field nil
+  "Id of the Jira \"Epic Link\" custom field, e.g. \"customfield_10014\".
+When nil the id is looked up once through the Jira field API."
+  :type '(choice (const :tag "Discover automatically" nil) string)
+  :group 'org-jira)
+
 (defvar jira-current-user-info nil
   "Cached information about the current user.")
 

@@ -69,6 +69,71 @@
 
 ;;; Export
 
+;;; Epics
+
+(ert-deftest org-jira-test-epics-jql-default-projects ()
+  (org-jira-test-util-with-api (org-jira-test-util-issues)
+    (org-jira-query-get-epics)
+    (let ((jql (org-jira-test-util-last-jql endpoints)))
+      (should (string-match-p "project IN ('Rezilient', 'SITE')" jql))
+      (should (string-match-p "issuetype = Epic" jql))
+      (should (string-match-p "status NOT IN (Done, Closed, Resolved)" jql))
+      (should-not (string-match-p "assignee" jql)))))
+
+(ert-deftest org-jira-test-epics-jql-custom-projects ()
+  (org-jira-test-util-with-api nil
+    (let ((jira-epic-projects '("ABC")))
+      (org-jira-query-get-epics))
+    (should (string-match-p "project IN ('ABC')" (org-jira-test-util-last-jql endpoints)))
+    (org-jira-query-get-epics '("X" "Y"))
+    (should (string-match-p "project IN ('X', 'Y')" (org-jira-test-util-last-jql endpoints)))))
+
+(ert-deftest org-jira-test-epics-no-projects ()
+  (let ((jira-epic-projects nil))
+    (should-error (org-jira-query-get-epics) :type 'user-error)))
+
+(ert-deftest org-jira-test-epics-table-same-shape-as-open-items ()
+  (cl-letf (((symbol-function 'org-jira-query-get-epics) (lambda (&rest _) (org-jira-test-util-issues)))
+            ((symbol-function 'org-jira-query-get-open-items) (lambda (&rest _) (org-jira-test-util-issues)))
+            (jira-current-user-info '((displayName . "x"))))
+    (let ((epics (with-temp-buffer (org-mode) (org-jira-insert-epics) (buffer-string)))
+          (open (with-temp-buffer (org-mode) (org-jira-insert-org-table) (buffer-string))))
+      (should (equal epics (concat "#+NAME: jira-epics\n" open)))
+      (should (string-match-p "TST-1: Æble ø å" epics))
+      (should (string-match-p "Pipe \\\\vert and \\[brackets\\]" epics)))))
+
+(ert-deftest org-jira-test-table-inserted-below-point ()
+  (cl-letf (((symbol-function 'org-jira-query-get-epics) (lambda (&rest _) (org-jira-test-util-issues)))
+            (jira-current-user-info '((displayName . "x"))))
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Heading\nsome text here\nafter")
+      (goto-char (point-min))
+      (search-forward "text")
+      (org-jira-insert-epics)
+      (let ((text (buffer-string)))
+        ;; the line point was on is intact, the table follows it, then the rest
+        (should (string-match-p "\\`\\* Heading\nsome text here\n#\\+NAME: jira-epics\n| Jira +|\n" text))
+        (should (string-suffix-p "|\n\nafter" text))))))
+
+(ert-deftest org-jira-test-table-at-line-start ()
+  (cl-letf (((symbol-function 'org-jira-query-get-epics) (lambda (&rest _) (org-jira-test-util-issues)))
+            (jira-current-user-info '((displayName . "x"))))
+    (with-temp-buffer
+      (org-mode)
+      (insert "before\n")
+      (org-jira-insert-epics)
+      (should (string-prefix-p "before\n#+NAME: jira-epics\n| Jira" (buffer-string))))))
+
+(ert-deftest org-jira-test-no-epics-inserts-nothing ()
+  (cl-letf (((symbol-function 'org-jira-query-get-epics) (lambda (&rest _) nil))
+            (jira-current-user-info '((displayName . "x"))))
+    (with-temp-buffer
+      (org-mode)
+      (insert "keep")
+      (org-jira-insert-epics)
+      (should (equal (buffer-string) "keep")))))
+
 (provide 'org-jira-test)
 
 ;;; org-jira-test.el ends here

@@ -70,6 +70,13 @@
       (should (string-match-p "TST-1: Æble ø å" (buffer-string)))
       (should (string-match-p "TST-2: Pipe \\\\vert and \\[brackets\\]" (buffer-string))))))
 
+(ert-deftest org-jira-http-test-epics-end-to-end ()
+  (org-jira-http-test-with-server
+    (with-temp-buffer
+      (org-mode)
+      (org-jira-insert-epics)
+      (should (string-match-p "TST-1: Æble ø å" (buffer-string))))))
+
 ;;; HTTP errors
 
 (ert-deftest org-jira-http-test-bad-token-signals-error ()
