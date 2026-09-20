@@ -45,7 +45,7 @@
 (ert-deftest org-jira-http-test-search-utf8-and-paging ()
   (org-jira-http-test-with-server
     (let* ((jira-max-results 2)
-           (issues (org-jira-query-get-all-assigned-items))
+           (issues (org-jira-query-get-open-items))
            (summaries (mapcar (lambda (i) (alist-get 'summary (alist-get 'fields i))) issues)))
       (should (= (length issues) 5))
       (should (equal (car summaries) "Æble ø å"))

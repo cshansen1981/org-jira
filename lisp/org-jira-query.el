@@ -49,29 +49,12 @@ MAX-RESULTS is the maximum number of results (default `jira-max-results')."
       (format "assignee = '%s'" username)
     "assignee = currentUser()"))
 
-(defun org-jira-query-get-all-assigned-items (&optional username)
-  "Get all Jira items assigned to current user or USERNAME."
-  (org-jira-query-get-all-assigned-items-with-jql
-   (format "%s ORDER BY updated DESC" (org-jira-query--assignee-clause username))))
-
 (defun org-jira-query-get-open-items (&optional username)
   "Get open Jira items assigned to current user or USERNAME.
 Open items are those not in 'Done', 'Closed', or 'Resolved' status."
   (org-jira-query-get-all-assigned-items-with-jql
    (format "%s AND status NOT IN (Done, Closed, Resolved) ORDER BY priority DESC, updated DESC"
            (org-jira-query--assignee-clause username))))
-
-(defun org-jira-query-get-items-by-status (status-list &optional exclude-p username)
-  "Get Jira items with specific statuses.
-STATUS-LIST is a list of status names.
-If EXCLUDE-P is non-nil, exclude these statuses instead.
-USERNAME if provided, otherwise current user."
-  (let ((status-string (mapconcat (lambda (s) (format "'%s'" s)) status-list ", ")))
-    (org-jira-query-get-all-assigned-items-with-jql
-     (format "%s AND status %s (%s) ORDER BY priority DESC, updated DESC"
-             (org-jira-query--assignee-clause username)
-             (if exclude-p "NOT IN" "IN")
-             status-string))))
 
 (provide 'org-jira-query)
 

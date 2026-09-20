@@ -4,9 +4,8 @@
 ;; Log time against a Jira issue.  Durations are given as HH:MM (the
 ;; format Org clocks use) and sent to Jira as `timeSpentSeconds'.
 ;;
-;; The issue key is taken from, in order: the `jira-key' text property
-;; (*Jira Items* buffer), the :KEY: property of the Org entry at point
-;; (as written by `org-jira-export-to-org'), or a prompt.
+;; The issue key is taken from the :KEY: property of the Org entry at
+;; point (searching parent headings), or from a prompt.
 
 ;;; Code:
 
@@ -54,15 +53,14 @@ timestamp (default now).  Return the created worklog."
                     (org-jira-worklog-payload hhmm comment started)))
 
 (defun org-jira-worklog--issue-key-at-point ()
-  "Return the Jira issue key at point, or nil."
-  (or (get-text-property (point) 'jira-key)
-      (and (derived-mode-p 'org-mode)
-           (org-entry-get nil "KEY" t))))
+  "Return the Jira issue key of the Org entry at point, or nil."
+  (and (derived-mode-p 'org-mode)
+       (org-entry-get nil "KEY" t)))
 
 ;;;###autoload
 (defun org-jira-worklog-log-work (issue-key hhmm &optional comment)
   "Log HHMM (HH:MM) of work on ISSUE-KEY, with optional COMMENT.
-Interactively, the issue key defaults to the one at point."
+Interactively, the issue key defaults to the :KEY: property at point."
   (interactive
    (let* ((default (org-jira-worklog--issue-key-at-point))
           (key (read-string (if default

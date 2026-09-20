@@ -73,7 +73,6 @@ Signal an error if the server answers with an HTTP status of 400 or above."
 
 (defun org-jira-api-test-connection ()
   "Test the connection to Jira and retrieve user information."
-  (interactive)
   (message "Testing Jira connection...")
   (let ((user-info (org-jira-api-request "/rest/api/2/myself")))
     (if user-info

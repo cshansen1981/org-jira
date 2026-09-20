@@ -24,17 +24,8 @@
   :type 'integer
   :group 'org-jira)
 
-(defcustom jira-status-choices
-  '("To Do" "In Progress" "In Review" "Testing" "Done" "Closed" "Resolved" "Open" "Blocked")
-  "Status names offered when filtering by status."
-  :type '(repeat string)
-  :group 'org-jira)
-
 (defvar jira-current-user-info nil
   "Cached information about the current user.")
-
-(defvar org-jira-buffer "*Jira Items*"
-  "Buffer name for displaying Jira items.")
 
 (provide 'org-jira-config)
 

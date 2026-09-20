@@ -59,12 +59,6 @@
     (goto-char (point-max))
     (should (equal (org-jira-worklog--issue-key-at-point) "TST-9"))))
 
-(ert-deftest org-jira-worklog-test-key-from-text-property ()
-  (with-temp-buffer
-    (insert (propertize "row" 'jira-key "TST-3"))
-    (goto-char 1)
-    (should (equal (org-jira-worklog--issue-key-at-point) "TST-3"))))
-
 (ert-deftest org-jira-worklog-test-interactive-command ()
   (let (args)
     (cl-letf (((symbol-function 'org-jira-worklog-add) (lambda (&rest a) (setq args a))))
