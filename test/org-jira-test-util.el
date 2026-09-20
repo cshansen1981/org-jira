@@ -1,12 +1,12 @@
-;;; jira-items-test-util.el --- Shared helpers for jira-items tests -*- lexical-binding: t; coding: utf-8 -*-
+;;; org-jira-test-util.el --- Shared helpers for org-jira tests -*- lexical-binding: t; coding: utf-8 -*-
 
 ;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
-(require 'jira-items)
+(require 'org-jira)
 
-(defun jira-test--issue (n summary &optional status)
+(defun org-jira-test-util--issue (n summary &optional status)
   "Return a Jira issue alist numbered N with SUMMARY and STATUS."
   `((key . ,(format "TST-%d" n))
     (fields . ((summary . ,summary)
@@ -18,19 +18,19 @@
 (defconst jira-test-summaries
   '("Æble ø å" "Pipe | and [brackets]" "Quote \"inside\" summary" "Plain"))
 
-(defun jira-test-issues ()
+(defun org-jira-test-util-issues ()
   "Return issues built from `jira-test-summaries'."
   (let ((n 0))
-    (mapcar (lambda (s) (jira-test--issue (cl-incf n) s)) jira-test-summaries)))
+    (mapcar (lambda (s) (org-jira-test-util--issue (cl-incf n) s)) jira-test-summaries)))
 
-(defmacro jira-test-with-api (pages &rest body)
-  "Run BODY with `jira-api-request' stubbed to serve search PAGES.
+(defmacro org-jira-test-util-with-api (pages &rest body)
+  "Run BODY with `org-jira-api-request' stubbed to serve search PAGES.
 PAGES is an issue list.  The stub honours startAt/maxResults and records
 each requested endpoint in the variable `endpoints' (bound for BODY)."
   (declare (indent 1))
   `(let ((endpoints nil)
          (all ,pages))
-     (cl-letf (((symbol-function 'jira-api-request)
+     (cl-letf (((symbol-function 'org-jira-api-request)
                 (lambda (endpoint &optional _method)
                   (push endpoint endpoints)
                   (let* ((start (if (string-match "startAt=\\([0-9]+\\)" endpoint)
@@ -41,11 +41,11 @@ each requested endpoint in the variable `endpoints' (bound for BODY)."
                       (issues . ,(seq-take (nthcdr start all) size)))))))
        ,@body)))
 
-(defun jira-test-last-jql (endpoints)
+(defun org-jira-test-util-last-jql (endpoints)
   "Decode the JQL from the most recent of ENDPOINTS."
   (when (string-match "jql=\\([^&]*\\)" (car endpoints))
     (decode-coding-string (url-unhex-string (match-string 1 (car endpoints))) 'utf-8)))
 
-(provide 'jira-items-test-util)
+(provide 'org-jira-test-util)
 
-;;; jira-items-test-util.el ends here
+;;; org-jira-test-util.el ends here

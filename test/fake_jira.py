@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal fake Jira Server used by the HTTP tests.
 
-Serves /rest/api/2/myself and /rest/api/2/search (with real startAt /
+Serves POST .../issue/KEY/worklog (echoing the body back), /rest/api/2/myself and /rest/api/2/search (with real startAt /
 maxResults paging over five fixture issues) and requires the header
 "Authorization: Bearer <TOKEN>".  Binds to an ephemeral port and prints
 "PORT <n>" on stdout once it is listening.
@@ -67,6 +67,19 @@ class Handler(BaseHTTPRequestHandler):
                 "jql": qs.get("jql", [""])[0],
                 "issues": ISSUES[start:start + size],
             })
+        self._send(404, {"errorMessages": ["Not found"]})
+
+    def do_POST(self):
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            return self._send(401, {"errorMessages": ["Unauthorized"]})
+        url = urlparse(self.path)
+        parts = url.path.strip("/").split("/")
+        if parts[:4] == ["rest", "api", "2", "issue"] and parts[-1] == "worklog":
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            if "json" not in (self.headers.get("Content-Type") or ""):
+                return self._send(415, {"errorMessages": ["Bad content type"]})
+            body = json.loads(raw.decode("utf-8"))
+            return self._send(201, {"id": "1", "issueKey": parts[4], "received": body})
         self._send(404, {"errorMessages": ["Not found"]})
 
     def log_message(self, *args):

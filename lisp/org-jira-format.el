@@ -1,11 +1,11 @@
-;;; jira-items-format.el --- Issue formatting helpers -*- lexical-binding: t; coding: utf-8 -*-
+;;; org-jira-format.el --- Issue formatting helpers -*- lexical-binding: t; coding: utf-8 -*-
 
 ;;; Commentary:
 ;; Pure helpers for formatting and grouping issues.
 
 ;;; Code:
 
-(defun jira-format-issue (issue)
+(defun org-jira-format-issue (issue)
   "Format a single ISSUE for display."
   (let* ((fields (alist-get 'fields issue))
          (key (alist-get 'key issue))
@@ -20,7 +20,7 @@
                 (concat (substring summary 0 47) "...")
               summary))))
 
-(defun jira-group-by (key-func list)
+(defun org-jira-format-group-by (key-func list)
   "Group LIST by KEY-FUNC.
 KEY-FUNC is a function that takes an element and returns its group key."
   (let ((groups '()))
@@ -32,6 +32,6 @@ KEY-FUNC is a function that takes an element and returns its group key."
           (push (cons key (list item)) groups))))
     (nreverse groups)))
 
-(provide 'jira-items-format)
+(provide 'org-jira-format)
 
-;;; jira-items-format.el ends here
+;;; org-jira-format.el ends here

@@ -1,17 +1,17 @@
-;;; jira-items-export.el --- Export Jira items to files -*- lexical-binding: t; coding: utf-8 -*-
+;;; org-jira-export.el --- Export Jira items to files -*- lexical-binding: t; coding: utf-8 -*-
 
 ;;; Commentary:
 ;; Export assigned Jira items to an Org file or a CSV file.
 
 ;;; Code:
 
-(require 'jira-items-config)
-(require 'jira-items-query)
+(require 'org-jira-config)
+(require 'org-jira-query)
 
-(defun jira-export-to-org ()
+(defun org-jira-export-to-org ()
   "Export Jira items to an Org mode file."
   (interactive)
-  (let ((issues (jira-get-all-assigned-items))
+  (let ((issues (org-jira-query-get-all-assigned-items))
         (filename (read-file-name "Export to Org file: " nil "jira-items.org"))
         (coding-system-for-write 'utf-8))  ; Ensure UTF-8 encoding for output
     (with-temp-file filename
@@ -37,10 +37,10 @@
           (insert "  :END:\n\n"))))
     (message "Exported %d items to %s" (length issues) filename)))
 
-(defun jira-export-to-csv ()
+(defun org-jira-export-to-csv ()
   "Export Jira items to a CSV file."
   (interactive)
-  (let ((issues (jira-get-all-assigned-items))
+  (let ((issues (org-jira-query-get-all-assigned-items))
         (filename (read-file-name "Export to CSV file: " nil "jira-items.csv"))
         (coding-system-for-write 'utf-8-with-signature))  ; UTF-8 with BOM for Excel compatibility
     (with-temp-file filename
@@ -61,6 +61,6 @@
                           key summary status priority issue-type project url)))))
     (message "Exported %d items to %s (UTF-8 encoded)" (length issues) filename)))
 
-(provide 'jira-items-export)
+(provide 'org-jira-export)
 
-;;; jira-items-export.el ends here
+;;; org-jira-export.el ends here

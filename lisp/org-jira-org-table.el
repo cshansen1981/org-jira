@@ -1,4 +1,4 @@
-;;; jira-items-org-table.el --- Insert Jira items as Org tables -*- lexical-binding: t; coding: utf-8 -*-
+;;; org-jira-org-table.el --- Insert Jira items as Org tables -*- lexical-binding: t; coding: utf-8 -*-
 
 ;;; Commentary:
 ;; Commands that insert Jira items at point as Org tables.
@@ -6,11 +6,11 @@
 ;;; Code:
 
 (require 'org)
-(require 'jira-items-config)
-(require 'jira-items-api)
-(require 'jira-items-query)
+(require 'org-jira-config)
+(require 'org-jira-api)
+(require 'org-jira-query)
 
-(defun jira--org-escape (string &optional brackets)
+(defun org-jira-org-table--escape (string &optional brackets)
   "Escape STRING so it can be used inside an Org table cell.
 Pipes become \\vert.  If BRACKETS is non-nil, square brackets are
 replaced by braces so the text is safe inside an Org link description."
@@ -19,14 +19,14 @@ replaced by braces so the text is safe inside an Org link description."
    (lambda (x) (pcase x ("|" "\\vert") ("[" "{") ("]" "}")))
    string t t))
 
-(defun jira-insert-org-table-open-items ()
+(defun org-jira-org-table-insert-open-items ()
   "Insert an Org table with open Jira items at point.
 The table has one column titled 'Jira' containing item titles (key: summary)."
   (interactive)
   (message "Retrieving open Jira items...")
   (unless jira-current-user-info
-    (jira-test-connection))
-  (let ((issues (jira-get-open-items)))
+    (org-jira-api-test-connection))
+  (let ((issues (org-jira-query-get-open-items)))
     (if issues
         (progn
           ;; Insert the table header
@@ -37,7 +37,7 @@ The table has one column titled 'Jira' containing item titles (key: summary)."
             (let* ((key (alist-get 'key issue))
                    (summary (alist-get 'summary (alist-get 'fields issue)))
                    ;; Escape pipe characters in summary to avoid breaking the table
-                   (escaped-summary (jira--org-escape summary))
+                   (escaped-summary (org-jira-org-table--escape summary))
                    (title (format "%s: %s" key escaped-summary)))
               (insert (format "| %s |\n" title))))
           ;; Align the table
@@ -46,14 +46,14 @@ The table has one column titled 'Jira' containing item titles (key: summary)."
           (message "Inserted %d open items as Org table" (length issues)))
       (message "No open items found"))))
 
-(defun jira-insert-org-table-with-details ()
+(defun org-jira-org-table-insert-with-details ()
   "Insert a detailed Org table with open Jira items at point.
 The table includes columns for Key, Summary, Status, and Priority."
   (interactive)
   (message "Retrieving open Jira items...")
   (unless jira-current-user-info
-    (jira-test-connection))
-  (let ((issues (jira-get-open-items)))
+    (org-jira-api-test-connection))
+  (let ((issues (org-jira-query-get-open-items)))
     (if issues
         (progn
           ;; Insert the table header
@@ -65,7 +65,7 @@ The table includes columns for Key, Summary, Status, and Priority."
                    (fields (alist-get 'fields issue))
                    (summary (alist-get 'summary fields))
                    ;; Escape pipe characters
-                   (escaped-summary (jira--org-escape summary))
+                   (escaped-summary (org-jira-org-table--escape summary))
                    ;; Truncate summary if too long
                    (truncated-summary (if (> (length escaped-summary) 50)
                                           (concat (substring escaped-summary 0 47) "...")
@@ -80,7 +80,7 @@ The table includes columns for Key, Summary, Status, and Priority."
           (message "Inserted %d open items as detailed Org table" (length issues)))
       (message "No open items found"))))
 
-(defun jira-insert-org-table-by-status ()
+(defun org-jira-org-table-insert-by-status ()
   "Insert an Org table with items grouped by status.
 Prompts for which statuses to include or exclude."
   (interactive)
@@ -88,8 +88,8 @@ Prompts for which statuses to include or exclude."
          (exclude (yes-or-no-p "Exclude these statuses? (No = include only these) ")))
     (message "Retrieving Jira items...")
     (unless jira-current-user-info
-      (jira-test-connection))
-    (let ((issues (jira-get-items-by-status selected exclude)))
+      (org-jira-api-test-connection))
+    (let ((issues (org-jira-query-get-items-by-status selected exclude)))
       (if issues
           (progn
             ;; Insert title
@@ -106,7 +106,7 @@ Prompts for which statuses to include or exclude."
                      (summary (alist-get 'summary fields))
                      (status (alist-get 'name (alist-get 'status fields)))
                      ;; Escape pipe characters
-                     (escaped-summary (jira--org-escape summary))
+                     (escaped-summary (org-jira-org-table--escape summary))
                      (title (format "%s: %s" key escaped-summary)))
                 (insert (format "| %s | %s |\n" title status))))
             ;; Align the table
@@ -115,14 +115,14 @@ Prompts for which statuses to include or exclude."
             (message "Inserted %d items as Org table" (length issues)))
         (message "No items found with selected criteria")))))
 
-(defun jira-insert-org-table-as-links ()
+(defun org-jira-org-table-insert-as-links ()
   "Insert an Org table with open Jira items as clickable links.
 Each item becomes a link to the Jira issue."
   (interactive)
   (message "Retrieving open Jira items...")
   (unless jira-current-user-info
-    (jira-test-connection))
-  (let ((issues (jira-get-open-items)))
+    (org-jira-api-test-connection))
+  (let ((issues (org-jira-query-get-open-items)))
     (if issues
         (progn
           ;; Insert the table header
@@ -133,7 +133,7 @@ Each item becomes a link to the Jira issue."
             (let* ((key (alist-get 'key issue))
                    (summary (alist-get 'summary (alist-get 'fields issue)))
                    ;; Escape pipe and bracket characters
-                   (escaped-summary (jira--org-escape summary t))
+                   (escaped-summary (org-jira-org-table--escape summary t))
                    (url (format "%s/browse/%s" jira-base-url key))
                    (link (format "[[%s][%s: %s]]" url key escaped-summary)))
               (insert (format "| %s |\n" link))))
@@ -143,6 +143,6 @@ Each item becomes a link to the Jira issue."
           (message "Inserted %d open items as Org table with links" (length issues)))
       (message "No open items found"))))
 
-(provide 'jira-items-org-table)
+(provide 'org-jira-org-table)
 
-;;; jira-items-org-table.el ends here
+;;; org-jira-org-table.el ends here
