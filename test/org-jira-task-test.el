@@ -25,6 +25,19 @@
            (jira-task-issue-type "Task"))
        ,@body)))
 
+(defmacro org-jira-task-test-with-epics-file (content &rest body)
+  "Run BODY with `jira-epics-file' bound to a temp file holding CONTENT.
+The file (and any buffer visiting it) is removed afterwards."
+  (declare (indent 1))
+  `(let* ((create-lockfiles nil)
+          (file (make-temp-file "org-jira-epics-test" nil ".org" ,content))
+          (jira-epics-file file))
+     (unwind-protect
+         (progn ,@body)
+       (let ((buf (find-buffer-visiting file)))
+         (when buf (kill-buffer buf)))
+       (ignore-errors (delete-file file)))))
+
 (defmacro org-jira-task-test-with-api (response &rest body)
   "Run BODY with `org-jira-api-request' stubbed to return RESPONSE.
 Each call's argument list is pushed on the variable `calls'."
@@ -61,16 +74,46 @@ Each call's argument list is pushed on the variable `calls'."
                      '("TST-1" "TST-2" "TST-3" "TST-4"))))))
 
 (ert-deftest org-jira-task-test-read-epic-offers-only-named-table ()
-  (org-jira-task-test-with-buffer org-jira-task-test--epics-table
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
     (let (offered)
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt coll &rest _) (setq offered coll) (car coll))))
         (should (equal (org-jira-task--read-epic) "SITE-1"))
         (should (equal offered '("SITE-1: Første epic" "REZ-22: Pipe \\vert x")))))))
 
-(ert-deftest org-jira-task-test-read-epic-without-table ()
-  (org-jira-task-test-with-buffer "nothing here\n"
-    (should-error (org-jira-task--read-epic) :type 'user-error)))
+;;; Reading Epics from `jira-epics-file'
+
+(ert-deftest org-jira-task-test-epics-file-unset ()
+  (let ((jira-epics-file nil))
+    (should-error (org-jira-task--epics) :type 'user-error)))
+
+(ert-deftest org-jira-task-test-epics-file-does-not-exist ()
+  (let ((jira-epics-file (expand-file-name "no-such-file.org" temporary-file-directory)))
+    (should-error (org-jira-task--epics) :type 'user-error)))
+
+(ert-deftest org-jira-task-test-epics-file-without-table ()
+  (org-jira-task-test-with-epics-file "nothing here\n"
+    (should-error (org-jira-task--epics) :type 'user-error)))
+
+(ert-deftest org-jira-task-test-epics-file-reads-table ()
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (should (equal (org-jira-task--epics)
+                   '(("SITE-1: Første epic" . "SITE-1")
+                     ("REZ-22: Pipe \\vert x" . "REZ-22"))))))
+
+(ert-deftest org-jira-task-test-epics-file-does-not-look-at-current-buffer ()
+  ;; the current buffer has an Epics table of its own; it must be ignored
+  (org-jira-task-test-with-epics-file "no table here\n"
+    (org-jira-task-test-with-buffer org-jira-task-test--epics-table
+      (should-error (org-jira-task--epics) :type 'user-error))))
+
+(ert-deftest org-jira-task-test-epics-file-reflects-unsaved-buffer-edits ()
+  ;; reading works off the live buffer, no save required
+  (org-jira-task-test-with-epics-file ""
+    (with-current-buffer (find-file-noselect jira-epics-file)
+      (goto-char (point-max))
+      (insert org-jira-task-test--epics-table))
+    (should (equal (mapcar #'cdr (org-jira-task--epics)) '("SITE-1" "REZ-22")))))
 
 ;;; Heading and body
 
@@ -156,56 +199,58 @@ Each call's argument list is pushed on the variable `calls'."
   (beginning-of-line))
 
 (defconst org-jira-task-test--doc
-  (concat org-jira-task-test--epics-table
-          "\n* TODO Write tests :work:\nSome details\nmore\n** Child\n"))
+  "* TODO Write tests :work:\nSome details\nmore\n** Child\n")
 
 (ert-deftest org-jira-task-test-command-happy-path ()
-  (org-jira-task-test-with-buffer org-jira-task-test--doc
-    (org-jira-task-test--goto "* TODO Write")
-    (org-jira-task-test-with-api '((key . "SITE-42"))
-      (cl-letf (((symbol-function 'completing-read)
-                 (lambda (_p coll &rest _) (car coll))))
-        (should (equal (org-jira-task-create) "SITE-42")))
-      (let ((fields (alist-get 'fields (nth 2 (car calls)))))
-        (should (equal (alist-get 'summary fields) "Write tests"))
-        (should (equal (alist-get 'description fields) "Some details\nmore"))
-        (should (equal (alist-get 'customfield_10014 fields) "SITE-1")))
-      (should (equal (org-entry-get nil "KEY") "SITE-42"))
-      ;; the property lives in the drawer of that heading, not the child
-      (org-jira-task-test--goto "** Child")
-      (should-not (org-entry-get nil "KEY")))))
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (org-jira-task-test-with-buffer org-jira-task-test--doc
+      (org-jira-task-test--goto "* TODO Write")
+      (org-jira-task-test-with-api '((key . "SITE-42"))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_p coll &rest _) (car coll))))
+          (should (equal (org-jira-task-create) "SITE-42")))
+        (let ((fields (alist-get 'fields (nth 2 (car calls)))))
+          (should (equal (alist-get 'summary fields) "Write tests"))
+          (should (equal (alist-get 'description fields) "Some details\nmore"))
+          (should (equal (alist-get 'customfield_10014 fields) "SITE-1")))
+        (should (equal (org-entry-get nil "KEY") "SITE-42"))
+        ;; the property lives in the drawer of that heading, not the child
+        (org-jira-task-test--goto "** Child")
+        (should-not (org-entry-get nil "KEY"))))))
 
 (ert-deftest org-jira-task-test-command-requires-heading ()
-  (org-jira-task-test-with-buffer org-jira-task-test--doc
-    (org-jira-task-test--goto "* TODO Write")
-    (forward-line 1)                    ; body text, not a heading
-    (org-jira-task-test-with-api '((key . "X-1"))
-      (should-error (org-jira-task-create) :type 'user-error)
-      (should (null calls)))))
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (org-jira-task-test-with-buffer org-jira-task-test--doc
+      (org-jira-task-test--goto "* TODO Write")
+      (forward-line 1)                  ; body text, not a heading
+      (org-jira-task-test-with-api '((key . "X-1"))
+        (should-error (org-jira-task-create) :type 'user-error)
+        (should (null calls))))))
 
 (ert-deftest org-jira-task-test-command-refuses-existing-key ()
-  (org-jira-task-test-with-buffer
-      (concat org-jira-task-test--epics-table
-              "\n* Task\n:PROPERTIES:\n:KEY: SITE-5\n:END:\n")
-    (org-jira-task-test--goto "* Task")
-    (org-jira-task-test-with-api '((key . "X-1"))
-      (should-error (org-jira-task-create) :type 'user-error)
-      (should (null calls)))))
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (org-jira-task-test-with-buffer "* Task\n:PROPERTIES:\n:KEY: SITE-5\n:END:\n"
+      (org-jira-task-test--goto "* Task")
+      (org-jira-task-test-with-api '((key . "X-1"))
+        (should-error (org-jira-task-create) :type 'user-error)
+        (should (null calls))))))
 
-(ert-deftest org-jira-task-test-command-without-epics-table ()
-  (org-jira-task-test-with-buffer "* Task\n"
-    (org-jira-task-test-with-api '((key . "X-1"))
-      (should-error (org-jira-task-create) :type 'user-error)
-      (should (null calls)))))
+(ert-deftest org-jira-task-test-command-epics-file-unset ()
+  (let ((jira-epics-file nil))
+    (org-jira-task-test-with-buffer "* Task\n"
+      (org-jira-task-test-with-api '((key . "X-1"))
+        (should-error (org-jira-task-create) :type 'user-error)
+        (should (null calls))))))
 
 (ert-deftest org-jira-task-test-command-no-key-in-response-writes-nothing ()
-  (org-jira-task-test-with-buffer org-jira-task-test--doc
-    (org-jira-task-test--goto "* TODO Write")
-    (org-jira-task-test-with-api '((id . "1"))
-      (cl-letf (((symbol-function 'completing-read)
-                 (lambda (_p coll &rest _) (car coll))))
-        (should-error (org-jira-task-create)))
-      (should-not (org-entry-get nil "KEY")))))
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (org-jira-task-test-with-buffer org-jira-task-test--doc
+      (org-jira-task-test--goto "* TODO Write")
+      (org-jira-task-test-with-api '((id . "1"))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_p coll &rest _) (car coll))))
+          (should-error (org-jira-task-create)))
+        (should-not (org-entry-get nil "KEY"))))))
 
 (ert-deftest org-jira-task-test-command-not-in-org-mode ()
   (with-temp-buffer
@@ -217,13 +262,14 @@ Each call's argument list is pushed on the variable `calls'."
 
 (ert-deftest org-jira-task-http-test-end-to-end ()
   (org-jira-http-test-with-server
-    (org-jira-task-test-with-buffer org-jira-task-test--doc
-      (let ((jira-epic-link-field nil))   ; force discovery through /field
-        (org-jira-task-test--goto "* TODO Write")
-        (cl-letf (((symbol-function 'completing-read)
-                   (lambda (_p coll &rest _) (car coll))))
-          (should (equal (org-jira-task-create) "TST-99")))
-        (should (equal (org-entry-get nil "KEY") "TST-99"))))))
+    (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+      (org-jira-task-test-with-buffer org-jira-task-test--doc
+        (let ((jira-epic-link-field nil))   ; force discovery through /field
+          (org-jira-task-test--goto "* TODO Write")
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_p coll &rest _) (car coll))))
+            (should (equal (org-jira-task-create) "TST-99")))
+          (should (equal (org-entry-get nil "KEY") "TST-99")))))))
 
 (ert-deftest org-jira-task-http-test-body-reaches-server-as-utf8 ()
   (org-jira-http-test-with-server

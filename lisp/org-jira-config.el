@@ -37,6 +37,13 @@ translated name)."
   :type 'string
   :group 'org-jira)
 
+(defcustom jira-epics-file nil
+  "Org file containing the Epics table inserted by `org-jira-insert-epics'.
+`org-jira-task-create' reads the Epics available to choose from out of
+this file rather than out of the buffer the command is invoked in."
+  :type '(choice (const :tag "Not set" nil) file)
+  :group 'org-jira)
+
 (defcustom jira-epic-link-field nil
   "Id of the Jira \"Epic Link\" custom field, e.g. \"customfield_10014\".
 When nil the id is looked up once through the Jira field API."

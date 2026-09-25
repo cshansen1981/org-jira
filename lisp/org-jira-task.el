@@ -4,9 +4,10 @@
 ;; Create a Jira task under an Epic from the Org heading at point.
 ;;
 ;; The Epic is chosen from the table made by `org-jira-insert-epics'
-;; (found in the current buffer by its #+NAME:).  The heading becomes the
-;; issue summary and the entry body its description.  The key of the new
-;; issue is stored in the heading's :KEY: property.
+;; (found by its #+NAME: in `jira-epics-file', not in the buffer the
+;; command is invoked in).  The heading becomes the issue summary and
+;; the entry body its description.  The key of the new issue is stored
+;; in the heading's :KEY: property.
 
 ;;; Code:
 
@@ -52,11 +53,36 @@ The result is an alist of (\"KEY: summary\" . \"KEY\"), without duplicates."
           (forward-line 1))))
     (nreverse epics)))
 
-(defun org-jira-task--read-epic ()
-  "Prompt for one of the Epics in the buffer and return its key."
-  (let ((epics (org-jira-task--epics-in-buffer)))
+(defun org-jira-task--epics-file ()
+  "Return the expanded, existing path of `jira-epics-file'.
+Signal a `user-error' if the option is unset or names a file that does
+not exist."
+  (unless jira-epics-file
+    (user-error "Set `jira-epics-file' to the Org file that has your Epics table"))
+  (let ((file (expand-file-name jira-epics-file)))
+    (unless (file-exists-p file)
+      (user-error "Epics file %s does not exist; run `org-jira-insert-epics' there first" file))
+    file))
+
+(defun org-jira-task--epics ()
+  "Return the Epics listed in `jira-epics-file'.
+See `org-jira-task--epics-in-buffer' for the shape of the result.
+Signal a `user-error' if `jira-epics-file' is unset, the file does not
+exist, or it has no Epics table."
+  (let* ((file (org-jira-task--epics-file))
+         (epics (with-current-buffer (find-file-noselect file)
+                  (save-excursion
+                    (save-restriction
+                      (widen)
+                      (org-jira-task--epics-in-buffer))))))
     (unless epics
-      (user-error "No Epics table in this buffer; run `org-jira-insert-epics' first"))
+      (user-error "No Epics table named %s in %s; run `org-jira-insert-epics' there first"
+                  org-jira-org-table-epics-name file))
+    epics))
+
+(defun org-jira-task--read-epic ()
+  "Prompt for one of the Epics in `jira-epics-file' and return its key."
+  (let ((epics (org-jira-task--epics)))
     (cdr (assoc (completing-read "Epic: " (mapcar #'car epics) nil t) epics))))
 
 (defun org-jira-task--heading-summary ()
@@ -95,9 +121,9 @@ the response from Jira."
 (defun org-jira-task-create ()
   "Create a Jira task under an Epic from the Org heading at point.
 Point must be on a heading that has no :KEY: property yet.  Prompt for
-the Epic among those listed by `org-jira-insert-epics'.  The heading
-is the summary and the entry body the description.  The key of the
-created issue is written to the heading's :KEY: property."
+the Epic among those listed in `jira-epics-file' by `org-jira-insert-epics'.
+The heading is the summary and the entry body the description.  The
+key of the created issue is written to the heading's :KEY: property."
   (interactive)
   (unless (and (derived-mode-p 'org-mode) (org-at-heading-p))
     (user-error "Point must be on an Org heading"))
