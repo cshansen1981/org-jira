@@ -6,8 +6,9 @@
 ;; The Epic is chosen from the table made by `org-jira-insert-epics'
 ;; (found by its #+NAME: in `jira-epics-file', not in the buffer the
 ;; command is invoked in).  The heading becomes the issue summary and
-;; the entry body its description.  The key of the new issue is stored
-;; in the heading's :KEY: property.
+;; the entry body its description.  The issue is assigned to the
+;; current Jira user.  The key of the new issue is stored in the
+;; heading's :KEY: property.
 
 ;;; Code:
 
@@ -107,18 +108,30 @@ Property drawers, planning lines and sub-headings are excluded."
 Some Jira instances require a non-empty description; an empty entry
 body would otherwise send none at all.")
 
+(defun org-jira-task--current-username ()
+  "Return the Jira username of the currently authenticated user.
+Test the connection first (populating `jira-current-user-info') if
+that has not already been done."
+  (unless jira-current-user-info
+    (org-jira-api-test-connection))
+  (or (alist-get 'name jira-current-user-info)
+      (user-error "Could not determine the current Jira user")))
+
 (defun org-jira-task-create-issue (epic-key summary &optional description)
   "Create a task titled SUMMARY under the Epic EPIC-KEY in Jira.
-DESCRIPTION is optional.  The project is taken from EPIC-KEY.  Return
-the response from Jira."
+DESCRIPTION is optional.  The project is taken from EPIC-KEY.  The
+issue is assigned to the current Jira user.  Return the response from
+Jira."
   (unless (string-match "\\`\\(.+\\)-[0-9]+\\'" epic-key)
     (user-error "Invalid Epic key %S" epic-key))
-  (let ((project (match-string 1 epic-key)))
+  (let ((project (match-string 1 epic-key))
+        (username (org-jira-task--current-username)))
     (org-jira-api-request
      "/rest/api/2/issue" "POST"
      `((fields . ((project . ((key . ,project)))
                   (summary . ,summary)
                   (issuetype . ((name . ,jira-task-issue-type)))
+                  (assignee . ((name . ,username)))
                   (,(intern (org-jira-task--epic-link-field)) . ,epic-key)
                   ,@(when description `((description . ,description)))))))))
 
@@ -129,8 +142,9 @@ Point must be on a heading that has no :KEY: property yet.  Prompt for
 the Epic among those listed in `jira-epics-file' by `org-jira-insert-epics'.
 The heading is the summary and the entry body the description; if the
 entry has no body, `org-jira-task-empty-body-description' is sent
-instead, since Jira may require a non-empty description.  The key of
-the created issue is written to the heading's :KEY: property."
+instead, since Jira may require a non-empty description.  The task is
+assigned to the current Jira user.  The key of the created issue is
+written to the heading's :KEY: property."
   (interactive)
   (unless (and (derived-mode-p 'org-mode) (org-at-heading-p))
     (user-error "Point must be on an Org heading"))

@@ -14,7 +14,9 @@
 ")
 
 (defmacro org-jira-task-test-with-buffer (text &rest body)
-  "Run BODY in an Org buffer containing TEXT, point at the buffer start."
+  "Run BODY in an Org buffer containing TEXT, point at the buffer start.
+`jira-current-user-info' is pre-populated so that BODY does not
+trigger a connection test unless it rebinds it to nil itself."
   (declare (indent 1))
   `(with-temp-buffer
      (org-mode)
@@ -22,7 +24,8 @@
      (goto-char (point-min))
      (let ((org-jira-task--epic-link-field-cache nil)
            (jira-epic-link-field "customfield_10014")
-           (jira-task-issue-type "Task"))
+           (jira-task-issue-type "Task")
+           (jira-current-user-info '((name . "csh") (displayName . "Christoffer Hansen"))))
        ,@body)))
 
 (defmacro org-jira-task-test-with-epics-file (content &rest body)
@@ -169,8 +172,32 @@ Each call's argument list is pushed on the variable `calls'."
         (should (equal (alist-get 'key (alist-get 'project fields)) "SITE"))
         (should (equal (alist-get 'summary fields) "Sum æ"))
         (should (equal (alist-get 'name (alist-get 'issuetype fields)) "Task"))
+        (should (equal (alist-get 'name (alist-get 'assignee fields)) "csh"))
         (should (equal (alist-get 'customfield_10014 fields) "SITE-1"))
         (should (equal (alist-get 'description fields) "Desc"))))))
+
+(ert-deftest org-jira-task-test-create-issue-tests-connection-when-username-unset ()
+  (org-jira-task-test-with-buffer ""
+    (let ((jira-current-user-info nil)
+          calls)
+      (cl-letf (((symbol-function 'org-jira-api-request)
+                 (lambda (endpoint &optional method data)
+                   (push (list endpoint method data) calls)
+                   (if (equal endpoint "/rest/api/2/myself")
+                       '((name . "csh") (displayName . "Christoffer Hansen"))
+                     '((key . "SITE-7"))))))
+        (org-jira-task-create-issue "SITE-1" "Sum")
+        ;; the connection is tested (and cached) before the issue is created
+        (should (equal (mapcar #'car (reverse calls))
+                       '("/rest/api/2/myself" "/rest/api/2/issue")))
+        (should (equal jira-current-user-info '((name . "csh") (displayName . "Christoffer Hansen"))))
+        (should (equal (alist-get 'name (alist-get 'assignee (alist-get 'fields (nth 2 (car calls)))))
+                       "csh"))))))
+
+(ert-deftest org-jira-task-test-create-issue-no-username-errors ()
+  (org-jira-task-test-with-buffer ""
+    (let ((jira-current-user-info '((displayName . "No name key"))))
+      (should-error (org-jira-task-create-issue "SITE-1" "Sum") :type 'user-error))))
 
 (ert-deftest org-jira-task-test-create-issue-without-description ()
   (org-jira-task-test-with-buffer ""
@@ -212,7 +239,8 @@ Each call's argument list is pushed on the variable `calls'."
         (let ((fields (alist-get 'fields (nth 2 (car calls)))))
           (should (equal (alist-get 'summary fields) "Write tests"))
           (should (equal (alist-get 'description fields) "Some details\nmore"))
-          (should (equal (alist-get 'customfield_10014 fields) "SITE-1")))
+          (should (equal (alist-get 'customfield_10014 fields) "SITE-1"))
+          (should (equal (alist-get 'name (alist-get 'assignee fields)) "csh")))
         (should (equal (org-entry-get nil "KEY") "SITE-42"))
         ;; the property lives in the drawer of that heading, not the child
         (org-jira-task-test--goto "** Child")
@@ -305,6 +333,19 @@ Each call's argument list is pushed on the variable `calls'."
         (should (equal (alist-get 'description fields) "Beskrivelse æøå"))
         (should (equal (alist-get 'customfield_10777 fields) "SITE-1"))
         (should (equal (alist-get 'key (alist-get 'project fields)) "SITE"))))))
+
+(ert-deftest org-jira-task-http-test-assignee-discovered-via-myself ()
+  ;; with no cached user, org-jira-task-create-issue must test the real
+  ;; connection first and use the resulting username as the assignee
+  (org-jira-http-test-with-server
+    (org-jira-task-test-with-buffer ""
+      (let* ((jira-epic-link-field nil)
+             (jira-current-user-info nil)
+             (resp (org-jira-task-create-issue "SITE-1" "Sum" "Desc"))
+             (fields (alist-get 'fields (alist-get 'received resp))))
+        (should (equal (alist-get 'name (alist-get 'assignee fields)) "soren"))
+        (should (equal jira-current-user-info
+                       '((displayName . "Søren Åberg") (name . "soren"))))))))
 
 (provide 'org-jira-task-test)
 
