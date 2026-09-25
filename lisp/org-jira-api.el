@@ -3,10 +3,16 @@
 ;;; Commentary:
 ;; Low-level HTTP access to Jira Server/Data Center using Bearer (PAT)
 ;; authentication.  UTF-8 is used throughout (Danish: æ, ø, å, etc.).
+;;
+;; Requests disable keep-alive reuse and retry once on an empty response
+;; (see `jira-request-retries'), which otherwise shows up as
+;; "Failed to retrieve data from ..." when Emacs reuses a connection a
+;; proxy or the server has already closed.
 
 ;;; Code:
 
 (require 'url)
+(require 'url-http)  ; for `url-http-attempt-keepalives', bound below
 (require 'json)
 (require 'org-jira-config)
 
@@ -32,6 +38,27 @@
         (mapconcat #'identity messages "; ")
       (string-trim (substring body 0 (min 200 (length body)))))))
 
+(defun org-jira-api--retrieve (url)
+  "Synchronously retrieve URL and return the response buffer.
+Retry up to `jira-request-retries' times if the connection produces no
+response at all (as opposed to an HTTP error Jira actually sent), which
+happens when Emacs reuses a keep-alive connection the server has
+already closed.  Keep-alive reuse is disabled for the same reason.
+Signal an error if every attempt comes back empty."
+  (let ((url-http-attempt-keepalives nil)
+        (attempts (1+ (max 0 jira-request-retries)))
+        (response-buffer nil)
+        (tried 0))
+    (while (and (not response-buffer) (< tried attempts))
+      (setq tried (1+ tried))
+      (setq response-buffer (url-retrieve-synchronously url t t jira-request-timeout))
+      (when (and (not response-buffer) (< tried attempts))
+        (message "No response from %s, retrying (%d/%d)..." url tried (1- attempts))))
+    (unless response-buffer
+      (error "Failed to retrieve data from %s (no response after %d attempt%s; check jira-base-url, VPN/proxy and jira-request-timeout)"
+             url attempts (if (= attempts 1) "" "s")))
+    response-buffer))
+
 (defun org-jira-api-request (endpoint &optional method data)
   "Make a synchronous request to Jira API ENDPOINT using METHOD (default GET).
 DATA, if non-nil, is a Lisp object (usually an alist) sent as a UTF-8
@@ -42,9 +69,7 @@ Signal an error if the server answers with an HTTP status of 400 or above."
          (url-request-extra-headers (org-jira-api-make-headers))
          (url-request-data (and data (encode-coding-string (json-encode data) 'utf-8)))
          (url (concat jira-base-url endpoint))
-         (response-buffer (url-retrieve-synchronously url t t 10)))
-    (unless response-buffer
-      (error "Failed to retrieve data from %s" url))
+         (response-buffer (org-jira-api--retrieve url)))
     (unwind-protect
         (let* ((status (buffer-local-value 'url-http-response-status response-buffer))
                (body (with-current-buffer response-buffer

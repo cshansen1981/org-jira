@@ -43,6 +43,20 @@ When nil the id is looked up once through the Jira field API."
   :type '(choice (const :tag "Discover automatically" nil) string)
   :group 'org-jira)
 
+(defcustom jira-request-timeout 30
+  "Seconds to wait for a Jira response before giving up on a request."
+  :type 'integer
+  :group 'org-jira)
+
+(defcustom jira-request-retries 1
+  "Number of times to silently retry a request that gets no response at all.
+This does not apply to a response Jira actually sent, such as an HTTP
+error status; it only covers the case where the connection produced no
+response, for example because Emacs reused a keep-alive connection the
+server had already closed."
+  :type 'integer
+  :group 'org-jira)
+
 (defvar jira-current-user-info nil
   "Cached information about the current user.")
 
