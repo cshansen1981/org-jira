@@ -25,6 +25,7 @@ trigger a connection test unless it rebinds it to nil itself."
      (let ((org-jira-task--epic-link-field-cache nil)
            (jira-epic-link-field "customfield_10014")
            (jira-task-issue-type "Task")
+           (jira-subtask-issue-type "Sub-task")
            (jira-current-user-info '((name . "csh") (displayName . "Christoffer Hansen"))))
        ,@body)))
 
@@ -83,6 +84,46 @@ Each call's argument list is pushed on the variable `calls'."
                  (lambda (_prompt coll &rest _) (setq offered coll) (car coll))))
         (should (equal (org-jira-task--read-epic) "SITE-1"))
         (should (equal offered '("SITE-1: Første epic" "REZ-22: Pipe \\vert x")))))))
+
+;;; Finding the parent issue
+
+(ert-deftest org-jira-task-test-parent-key-no-ancestor ()
+  (org-jira-task-test-with-buffer "* Task\n"
+    (org-jira-task-test--goto "* Task")
+    (should (null (org-jira-task--parent-key)))))
+
+(ert-deftest org-jira-task-test-parent-key-immediate-parent ()
+  (org-jira-task-test-with-buffer
+      "* Parent\n:PROPERTIES:\n:KEY: SITE-9\n:END:\n** Child\n"
+    (org-jira-task-test--goto "** Child")
+    (should (equal (org-jira-task--parent-key) "SITE-9"))))
+
+(ert-deftest org-jira-task-test-parent-key-walks-up-past-parent-without-key ()
+  (org-jira-task-test-with-buffer
+      "* Grandparent\n:PROPERTIES:\n:KEY: SITE-9\n:END:\n** Parent\n*** Child\n"
+    (org-jira-task-test--goto "*** Child")
+    (should (equal (org-jira-task--parent-key) "SITE-9"))))
+
+(ert-deftest org-jira-task-test-parent-key-ignores-siblings ()
+  (org-jira-task-test-with-buffer
+      "* Parent\n** Sibling\n:PROPERTIES:\n:KEY: X-1\n:END:\n** Child\n"
+    (org-jira-task-test--goto "** Child")
+    (should (null (org-jira-task--parent-key)))))
+
+(ert-deftest org-jira-task-test-parent-key-ignores-own-property ()
+  (org-jira-task-test-with-buffer
+      "* Parent\n:PROPERTIES:\n:KEY: SITE-9\n:END:\n** Child\n:PROPERTIES:\n:KEY: SITE-10\n:END:\n"
+    (org-jira-task-test--goto "** Child")
+    (should (equal (org-jira-task--parent-key) "SITE-9"))))
+
+;;; Project key
+
+(ert-deftest org-jira-task-test-project-key ()
+  (should (equal (org-jira-task--project-key "SITE-12") "SITE"))
+  (should (equal (org-jira-task--project-key "MY_P-7") "MY_P")))
+
+(ert-deftest org-jira-task-test-project-key-invalid ()
+  (should-error (org-jira-task--project-key "nonsense") :type 'user-error))
 
 ;;; Reading Epics from `jira-epics-file'
 
@@ -217,6 +258,42 @@ Each call's argument list is pushed on the variable `calls'."
 (ert-deftest org-jira-task-test-create-issue-bad-epic-key ()
   (should-error (org-jira-task-create-issue "nonsense" "Sum") :type 'user-error))
 
+;;; Creating a subtask
+
+(ert-deftest org-jira-task-test-create-subtask-issue-payload ()
+  (org-jira-task-test-with-buffer ""
+    (org-jira-task-test-with-api '((key . "SITE-8"))
+      (org-jira-task-create-subtask-issue "SITE-7" "Sub æ" "Desc")
+      (let* ((call (car calls))
+             (fields (alist-get 'fields (nth 2 call))))
+        (should (equal (nth 0 call) "/rest/api/2/issue"))
+        (should (equal (nth 1 call) "POST"))
+        (should (equal (alist-get 'key (alist-get 'project fields)) "SITE"))
+        (should (equal (alist-get 'summary fields) "Sub æ"))
+        (should (equal (alist-get 'name (alist-get 'issuetype fields)) "Sub-task"))
+        (should (equal (alist-get 'name (alist-get 'assignee fields)) "csh"))
+        (should (equal (alist-get 'key (alist-get 'parent fields)) "SITE-7"))
+        (should (equal (alist-get 'description fields) "Desc"))
+        ;; subtasks are not linked to an Epic directly, unlike tasks
+        (should-not (assq 'customfield_10014 fields))))))
+
+(ert-deftest org-jira-task-test-create-subtask-issue-without-description ()
+  (org-jira-task-test-with-buffer ""
+    (org-jira-task-test-with-api '((key . "SITE-8"))
+      (org-jira-task-create-subtask-issue "SITE-7" "Sub")
+      (should-not (assq 'description (alist-get 'fields (nth 2 (car calls))))))))
+
+(ert-deftest org-jira-task-test-create-subtask-issue-custom-type ()
+  (org-jira-task-test-with-buffer ""
+    (let ((jira-subtask-issue-type "Delopgave"))
+      (org-jira-task-test-with-api '((key . "SITE-8"))
+        (org-jira-task-create-subtask-issue "SITE-7" "Sub")
+        (should (equal (alist-get 'name (alist-get 'issuetype (alist-get 'fields (nth 2 (car calls)))))
+                       "Delopgave"))))))
+
+(ert-deftest org-jira-task-test-create-subtask-issue-bad-parent-key ()
+  (should-error (org-jira-task-create-subtask-issue "nonsense" "Sub") :type 'user-error))
+
 ;;; The command
 
 (defun org-jira-task-test--goto (text)
@@ -256,6 +333,22 @@ Each call's argument list is pushed on the variable `calls'."
           (org-jira-task-create))
         (should (equal (alist-get 'description (alist-get 'fields (nth 2 (car calls))))
                        org-jira-task-empty-body-description))))))
+
+(ert-deftest org-jira-task-test-command-creates-subtask-when-parent-has-key ()
+  ;; no epics file is set up, proving the subtask path never consults it
+  (org-jira-task-test-with-buffer
+      "* Parent\n:PROPERTIES:\n:KEY: SITE-7\n:END:\n** Child task\nSome body\n"
+    (let ((jira-epics-file nil))
+      (org-jira-task-test--goto "** Child")
+      (org-jira-task-test-with-api '((key . "SITE-8"))
+        (should (equal (org-jira-task-create) "SITE-8"))
+        (let ((fields (alist-get 'fields (nth 2 (car calls)))))
+          (should (equal (alist-get 'summary fields) "Child task"))
+          (should (equal (alist-get 'description fields) "Some body"))
+          (should (equal (alist-get 'key (alist-get 'parent fields)) "SITE-7"))
+          (should (equal (alist-get 'name (alist-get 'issuetype fields)) "Sub-task"))
+          (should (equal (alist-get 'name (alist-get 'assignee fields)) "csh")))
+        (should (equal (org-entry-get nil "KEY") "SITE-8"))))))
 
 (ert-deftest org-jira-task-test-command-requires-heading ()
   (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
@@ -332,6 +425,27 @@ Each call's argument list is pushed on the variable `calls'."
         (should (equal (alist-get 'summary fields) "Æble ø å"))
         (should (equal (alist-get 'description fields) "Beskrivelse æøå"))
         (should (equal (alist-get 'customfield_10777 fields) "SITE-1"))
+        (should (equal (alist-get 'key (alist-get 'project fields)) "SITE"))))))
+
+(ert-deftest org-jira-task-http-test-subtask-end-to-end ()
+  ;; no jira-epic-link-field / discovery override needed: a subtask
+  ;; never looks up the Epic Link field at all
+  (org-jira-http-test-with-server
+    (org-jira-task-test-with-buffer
+        "* Parent\n:PROPERTIES:\n:KEY: SITE-7\n:END:\n** Child task\nSome body\n"
+      (org-jira-task-test--goto "** Child")
+      (should (equal (org-jira-task-create) "TST-99"))
+      (should (equal (org-entry-get nil "KEY") "TST-99")))))
+
+(ert-deftest org-jira-task-http-test-subtask-body-reaches-server ()
+  (org-jira-http-test-with-server
+    (org-jira-task-test-with-buffer ""
+      (let* ((resp (org-jira-task-create-subtask-issue "SITE-1" "Sub æ" "Beskrivelse æøå"))
+             (fields (alist-get 'fields (alist-get 'received resp))))
+        (should (equal (alist-get 'summary fields) "Sub æ"))
+        (should (equal (alist-get 'description fields) "Beskrivelse æøå"))
+        (should (equal (alist-get 'key (alist-get 'parent fields)) "SITE-1"))
+        (should (equal (alist-get 'name (alist-get 'issuetype fields)) "Sub-task"))
         (should (equal (alist-get 'key (alist-get 'project fields)) "SITE"))))))
 
 (ert-deftest org-jira-task-http-test-assignee-discovered-via-myself ()

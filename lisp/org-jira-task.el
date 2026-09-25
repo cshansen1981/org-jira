@@ -1,13 +1,15 @@
 ;;; org-jira-task.el --- Create Jira tasks from Org headings -*- lexical-binding: t; coding: utf-8 -*-
 
 ;;; Commentary:
-;; Create a Jira task under an Epic from the Org heading at point.
+;; Create a Jira task, or subtask, from the Org heading at point.
 ;;
-;; The Epic is chosen from the table made by `org-jira-insert-epics'
-;; (found by its #+NAME: in `jira-epics-file', not in the buffer the
-;; command is invoked in).  The heading becomes the issue summary and
-;; the entry body its description.  The issue is assigned to the
-;; current Jira user.  The key of the new issue is stored in the
+;; If an ancestor heading already has a :KEY: property, a subtask is
+;; created under that issue.  Otherwise a task is created under an
+;; Epic chosen from the table made by `org-jira-insert-epics' (found
+;; by its #+NAME: in `jira-epics-file', not in the buffer the command
+;; is invoked in).  Either way, the heading becomes the issue summary
+;; and the entry body its description, and the issue is assigned to
+;; the current Jira user.  The key of the new issue is stored in the
 ;; heading's :KEY: property.
 
 ;;; Code:
@@ -86,6 +88,19 @@ exist, or it has no Epics table."
   (let ((epics (org-jira-task--epics)))
     (cdr (assoc (completing-read "Epic: " (mapcar #'car epics) nil t) epics))))
 
+(defun org-jira-task--parent-key ()
+  "Return the Jira key of the nearest ancestor heading that has one.
+Walk upward through the outline, checking each ancestor's own :KEY:
+property (not its inherited value), stopping at the first one set.
+The heading at point itself is not considered.  Return nil if no
+ancestor has a :KEY:."
+  (save-excursion
+    (org-back-to-heading t)
+    (let (key)
+      (while (and (not key) (org-up-heading-safe))
+        (setq key (org-entry-get nil "KEY")))
+      key)))
+
 (defun org-jira-task--heading-summary ()
   "Return the heading text at point without TODO keyword, priority and tags."
   (string-trim (substring-no-properties (org-get-heading t t t t))))
@@ -117,34 +132,68 @@ that has not already been done."
   (or (alist-get 'name jira-current-user-info)
       (user-error "Could not determine the current Jira user")))
 
+(defun org-jira-task--project-key (issue-key)
+  "Return the project part of ISSUE-KEY, e.g. \"SITE\" from \"SITE-12\"."
+  (unless (string-match "\\`\\(.+\\)-[0-9]+\\'" issue-key)
+    (user-error "Invalid Jira key %S" issue-key))
+  (match-string 1 issue-key))
+
+(defun org-jira-task--base-fields (project-key issue-type summary description)
+  "Return the Jira issue-creation fields common to tasks and subtasks.
+PROJECT-KEY and ISSUE-TYPE name the project and issue type; SUMMARY is
+the issue summary and DESCRIPTION is optional.  The issue is assigned
+to the current Jira user."
+  `((project . ((key . ,project-key)))
+    (summary . ,summary)
+    (issuetype . ((name . ,issue-type)))
+    (assignee . ((name . ,(org-jira-task--current-username))))
+    ,@(when description `((description . ,description)))))
+
 (defun org-jira-task-create-issue (epic-key summary &optional description)
   "Create a task titled SUMMARY under the Epic EPIC-KEY in Jira.
-DESCRIPTION is optional.  The project is taken from EPIC-KEY.  The
-issue is assigned to the current Jira user.  Return the response from
-Jira."
-  (unless (string-match "\\`\\(.+\\)-[0-9]+\\'" epic-key)
-    (user-error "Invalid Epic key %S" epic-key))
-  (let ((project (match-string 1 epic-key))
-        (username (org-jira-task--current-username)))
+DESCRIPTION is optional.  The project and issue type come from
+EPIC-KEY and `jira-task-issue-type'.  The issue is assigned to the
+current Jira user.  Return the response from Jira."
+  (let ((project (org-jira-task--project-key epic-key)))
     (org-jira-api-request
      "/rest/api/2/issue" "POST"
-     `((fields . ((project . ((key . ,project)))
-                  (summary . ,summary)
-                  (issuetype . ((name . ,jira-task-issue-type)))
-                  (assignee . ((name . ,username)))
-                  (,(intern (org-jira-task--epic-link-field)) . ,epic-key)
-                  ,@(when description `((description . ,description)))))))))
+     `((fields . (,@(org-jira-task--base-fields project jira-task-issue-type summary description)
+                  (,(intern (org-jira-task--epic-link-field)) . ,epic-key)))))))
+
+(defun org-jira-task-create-subtask-issue (parent-key summary &optional description)
+  "Create a subtask titled SUMMARY under the issue PARENT-KEY in Jira.
+DESCRIPTION is optional.  The project comes from PARENT-KEY and the
+issue type from `jira-subtask-issue-type'.  The issue is assigned to
+the current Jira user.  Return the response from Jira."
+  (let ((project (org-jira-task--project-key parent-key)))
+    (org-jira-api-request
+     "/rest/api/2/issue" "POST"
+     `((fields . (,@(org-jira-task--base-fields project jira-subtask-issue-type summary description)
+                  (parent . ((key . ,parent-key)))))))))
+
+(defun org-jira-task--finish (response what)
+  "Store the key from Jira RESPONSE in the :KEY: property at point.
+WHAT names the kind of issue, for the error when RESPONSE has no key.
+Return the key."
+  (let ((key (alist-get 'key response)))
+    (unless key
+      (error "Jira did not return a key for the new %s" what))
+    (org-entry-put nil "KEY" key)
+    key))
 
 ;;;###autoload
 (defun org-jira-task-create ()
-  "Create a Jira task under an Epic from the Org heading at point.
-Point must be on a heading that has no :KEY: property yet.  Prompt for
-the Epic among those listed in `jira-epics-file' by `org-jira-insert-epics'.
-The heading is the summary and the entry body the description; if the
-entry has no body, `org-jira-task-empty-body-description' is sent
-instead, since Jira may require a non-empty description.  The task is
-assigned to the current Jira user.  The key of the created issue is
-written to the heading's :KEY: property."
+  "Create a Jira task, or subtask, from the Org heading at point.
+Point must be on a heading that has no :KEY: property yet.  If an
+ancestor heading has one (see `org-jira-task--parent-key'), a subtask
+is created under that issue.  Otherwise, prompt for the Epic among
+those listed in `jira-epics-file' by `org-jira-insert-epics' and
+create a task under it.  Either way, the heading is the summary and
+the entry body the description; if the entry has no body,
+`org-jira-task-empty-body-description' is sent instead, since Jira may
+require a non-empty description.  The issue is assigned to the
+current Jira user.  The key of the created issue is written to the
+heading's :KEY: property."
   (interactive)
   (unless (and (derived-mode-p 'org-mode) (org-at-heading-p))
     (user-error "Point must be on an Org heading"))
@@ -154,16 +203,20 @@ written to the heading's :KEY: property."
   (let ((summary (org-jira-task--heading-summary)))
     (when (string-empty-p summary)
       (user-error "The heading has no text to use as summary"))
-    (let* ((epic (org-jira-task--read-epic))
-           (response (org-jira-task-create-issue
-                      epic summary
-                      (or (org-jira-task--body) org-jira-task-empty-body-description)))
-           (key (alist-get 'key response)))
-      (unless key
-        (error "Jira did not return a key for the new task"))
-      (org-entry-put nil "KEY" key)
-      (message "Created %s under %s" key epic)
-      key)))
+    (let ((description (or (org-jira-task--body) org-jira-task-empty-body-description))
+          (parent (org-jira-task--parent-key)))
+      (if parent
+          (let ((key (org-jira-task--finish
+                      (org-jira-task-create-subtask-issue parent summary description)
+                      "subtask")))
+            (message "Created %s as a subtask of %s" key parent)
+            key)
+        (let* ((epic (org-jira-task--read-epic))
+               (key (org-jira-task--finish
+                     (org-jira-task-create-issue epic summary description)
+                     "task")))
+          (message "Created %s under %s" key epic)
+          key)))))
 
 (provide 'org-jira-task)
 
