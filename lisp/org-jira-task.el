@@ -102,6 +102,11 @@ Property drawers, planning lines and sub-headings are excluded."
              (body (string-trim (buffer-substring-no-properties beg end))))
         (unless (string-empty-p body) body)))))
 
+(defconst org-jira-task-empty-body-description "."
+  "Description sent to Jira when the Org entry has no body.
+Some Jira instances require a non-empty description; an empty entry
+body would otherwise send none at all.")
+
 (defun org-jira-task-create-issue (epic-key summary &optional description)
   "Create a task titled SUMMARY under the Epic EPIC-KEY in Jira.
 DESCRIPTION is optional.  The project is taken from EPIC-KEY.  Return
@@ -122,8 +127,10 @@ the response from Jira."
   "Create a Jira task under an Epic from the Org heading at point.
 Point must be on a heading that has no :KEY: property yet.  Prompt for
 the Epic among those listed in `jira-epics-file' by `org-jira-insert-epics'.
-The heading is the summary and the entry body the description.  The
-key of the created issue is written to the heading's :KEY: property."
+The heading is the summary and the entry body the description; if the
+entry has no body, `org-jira-task-empty-body-description' is sent
+instead, since Jira may require a non-empty description.  The key of
+the created issue is written to the heading's :KEY: property."
   (interactive)
   (unless (and (derived-mode-p 'org-mode) (org-at-heading-p))
     (user-error "Point must be on an Org heading"))
@@ -135,7 +142,8 @@ key of the created issue is written to the heading's :KEY: property."
       (user-error "The heading has no text to use as summary"))
     (let* ((epic (org-jira-task--read-epic))
            (response (org-jira-task-create-issue
-                      epic summary (org-jira-task--body)))
+                      epic summary
+                      (or (org-jira-task--body) org-jira-task-empty-body-description)))
            (key (alist-get 'key response)))
       (unless key
         (error "Jira did not return a key for the new task"))

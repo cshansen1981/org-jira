@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Minimal fake Jira Server used by the HTTP tests.
 
-Serves POST /rest/api/2/issue and .../issue/KEY/worklog (echoing the body back), /rest/api/2/field, /rest/api/2/myself and /rest/api/2/search (with real startAt /
-maxResults paging over five fixture issues) and requires the header
-"Authorization: Bearer <TOKEN>".  Binds to an ephemeral port and prints
-"PORT <n>" on stdout once it is listening.
+Serves POST /rest/api/2/issue (rejecting a blank description with a 400,
+like a Jira instance that requires one) and .../issue/KEY/worklog
+(echoing the body back), /rest/api/2/field, /rest/api/2/myself and
+/rest/api/2/search (with real startAt/maxResults paging over five
+fixture issues), and requires the header "Authorization: Bearer <TOKEN>".
+Binds to an ephemeral port and prints "PORT <n>" on stdout once it is
+listening.
 
 Usage: fake_jira.py [TOKEN]   (default token: test-token)
 """
@@ -83,6 +86,10 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["rest", "api", "2", "issue"]:
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             body = json.loads(raw.decode("utf-8"))
+            # Mimics a Jira instance where the description field is
+            # required on the create screen: absent or blank is rejected.
+            if not (body.get("fields") or {}).get("description", "").strip():
+                return self._send(400, {"errorMessages": [], "errors": {"description": "Description is required."}})
             return self._send(201, {"id": "9", "key": "TST-99", "received": body})
         if parts[:4] == ["rest", "api", "2", "issue"] and parts[-1] == "worklog":
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))

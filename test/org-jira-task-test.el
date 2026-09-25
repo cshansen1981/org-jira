@@ -218,6 +218,17 @@ Each call's argument list is pushed on the variable `calls'."
         (org-jira-task-test--goto "** Child")
         (should-not (org-entry-get nil "KEY"))))))
 
+(ert-deftest org-jira-task-test-command-empty-body-sends-placeholder-description ()
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (org-jira-task-test-with-buffer "* Task with no body\n** Child\n"
+      (org-jira-task-test--goto "* Task")
+      (org-jira-task-test-with-api '((key . "SITE-42"))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_p coll &rest _) (car coll))))
+          (org-jira-task-create))
+        (should (equal (alist-get 'description (alist-get 'fields (nth 2 (car calls))))
+                       org-jira-task-empty-body-description))))))
+
 (ert-deftest org-jira-task-test-command-requires-heading ()
   (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
     (org-jira-task-test-with-buffer org-jira-task-test--doc
@@ -266,6 +277,19 @@ Each call's argument list is pushed on the variable `calls'."
       (org-jira-task-test-with-buffer org-jira-task-test--doc
         (let ((jira-epic-link-field nil))   ; force discovery through /field
           (org-jira-task-test--goto "* TODO Write")
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_p coll &rest _) (car coll))))
+            (should (equal (org-jira-task-create) "TST-99")))
+          (should (equal (org-entry-get nil "KEY") "TST-99")))))))
+
+(ert-deftest org-jira-task-http-test-empty-body-against-server-requiring-description ()
+  ;; the fake server rejects a blank description with HTTP 400, matching
+  ;; a real Jira instance whose create screen requires one
+  (org-jira-http-test-with-server
+    (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+      (org-jira-task-test-with-buffer "* Task with no body\n"
+        (let ((jira-epic-link-field nil))
+          (org-jira-task-test--goto "* Task")
           (cl-letf (((symbol-function 'completing-read)
                      (lambda (_p coll &rest _) (car coll))))
             (should (equal (org-jira-task-create) "TST-99")))
