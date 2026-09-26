@@ -10,6 +10,9 @@
 (require 'org-jira-api)
 (require 'org-jira-query)
 
+(defconst org-jira-org-table-items-name "JiraItems"
+  "The #+NAME: given to tables of your open Jira items.")
+
 (defconst org-jira-org-table-epics-name "jira-epics"
   "The #+NAME: given to tables of Epics, so they can be found again.")
 
@@ -19,11 +22,11 @@ Pipes become \\vert."
   (replace-regexp-in-string "|" "\\vert" string t t))
 
 (defun org-jira-org-table-insert-issues (issues description &optional name)
-  "Insert ISSUES as a one-column Org table below point.
-Each row reads \"KEY: summary\".  DESCRIPTION names the kind of issue
-for the echo-area message.  If NAME is non-nil the table is preceded by
-a #+NAME: line.  If point is not at the start of a line, the table
-starts on the next line."
+  "Insert ISSUES as a two-column Org table below point.
+The columns are Key and Title (the issue summary).  DESCRIPTION
+names the kind of issue for the echo-area message.  If NAME is non-nil
+the table is preceded by a #+NAME: line.  If point is not at the start
+of a line, the table starts on the next line."
   (if (null issues)
       (message "No %s found" description)
     (unless (bolp)
@@ -32,12 +35,12 @@ starts on the next line."
     (when name
       (insert (format "#+NAME: %s\n" name)))
     (let ((start (point)))
-      (insert "| Jira |\n")
-      (insert "|------|\n")
+      (insert "| Key | Title |\n")
+      (insert "|-----+-------|\n")
       (dolist (issue issues)
         (let ((key (alist-get 'key issue))
               (summary (alist-get 'summary (alist-get 'fields issue))))
-          (insert (format "| %s: %s |\n" key (org-jira-org-table--escape summary)))))
+          (insert (format "| %s | %s |\n" key (org-jira-org-table--escape summary)))))
       (save-excursion
         (goto-char start)
         (org-table-align)))
@@ -54,14 +57,16 @@ DESCRIPTION names the kind of issue, for messages.  NAME is an optional
 
 (defun org-jira-org-table-insert-open-items ()
   "Insert an Org table with your open Jira items below point.
-The table has one column titled \='Jira\=' containing item titles (key: summary)."
-  (org-jira-org-table--insert-fetched "open items" #'org-jira-query-get-open-items))
+The table is named `org-jira-org-table-items-name' and has two
+columns, Key and Title."
+  (org-jira-org-table--insert-fetched
+   "open items" #'org-jira-query-get-open-items org-jira-org-table-items-name))
 
 (defun org-jira-org-table-insert-epics ()
   "Insert an Org table with open Epics of `jira-epic-projects' below point.
 The table is named `org-jira-org-table-epics-name' so that
-`org-jira-task-create' can find it.  Rows are shaped like those of
-`org-jira-org-table-insert-open-items'."
+`org-jira-task-create' can find it.  Its Key and Title columns are
+the same as those of `org-jira-org-table-insert-open-items'."
   (org-jira-org-table--insert-fetched
    "epics" #'org-jira-query-get-epics org-jira-org-table-epics-name))
 

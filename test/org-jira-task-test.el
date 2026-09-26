@@ -7,10 +7,10 @@
 
 (defconst org-jira-task-test--epics-table
   "#+NAME: jira-epics
-| Jira                 |
-|----------------------|
-| SITE-1: Første epic  |
-| REZ-22: Pipe \\vert x |
+| Key    | Title         |
+|--------+---------------|
+| SITE-1 | Første epic   |
+| REZ-22 | Pipe \\vert x |
 ")
 
 (defmacro org-jira-task-test-with-buffer (text &rest body)
@@ -60,7 +60,7 @@ Each call's argument list is pushed on the variable `calls'."
                      ("REZ-22: Pipe \\vert x" . "REZ-22"))))))
 
 (ert-deftest org-jira-task-test-epics-ignores-unnamed-tables ()
-  (org-jira-task-test-with-buffer "| Jira |\n|---|\n| SITE-5: not an epic |\n"
+  (org-jira-task-test-with-buffer "| Key | Title |\n|---+---|\n| SITE-5 | not an epic |\n"
     (should (null (org-jira-task--epics-in-buffer)))))
 
 (ert-deftest org-jira-task-test-epics-deduplicates-tables ()

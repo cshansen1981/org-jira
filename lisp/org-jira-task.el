@@ -39,7 +39,9 @@ Use `jira-epic-link-field' if set, otherwise discover (and cache) it."
 
 (defun org-jira-task--epics-in-buffer ()
   "Return the Epics listed in the tables named `org-jira-org-table-epics-name'.
-The result is an alist of (\"KEY: summary\" . \"KEY\"), without duplicates."
+The tables have a Key and a Title column.  The result is an alist of
+(\"KEY: title\" . \"KEY\"), without duplicates.  Rows whose first
+cell is not a Jira key (the header, rules) are skipped."
   (let (epics)
     (save-excursion
       (goto-char (point-min))
@@ -49,10 +51,14 @@ The result is an alist of (\"KEY: summary\" . \"KEY\"), without duplicates."
               nil t)
         (forward-line 1)
         (while (looking-at "^[ \t]*|\\(.*\\)|[ \t]*$")
-          (let ((cell (string-trim (match-string-no-properties 1))))
-            (when (string-match "\\`\\([A-Z][A-Z0-9_]*-[0-9]+\\): " cell)
-              (unless (assoc cell epics)
-                (push (cons cell (match-string 1 cell)) epics))))
+          (let* ((cells (mapcar #'string-trim
+                                (split-string (match-string-no-properties 1) "|")))
+                 (key (car cells))
+                 (title (or (cadr cells) "")))
+            (when (string-match-p "\\`[A-Z][A-Z0-9_]*-[0-9]+\\'" key)
+              (let ((label (format "%s: %s" key title)))
+                (unless (assoc label epics)
+                  (push (cons label key) epics)))))
           (forward-line 1))))
     (nreverse epics)))
 

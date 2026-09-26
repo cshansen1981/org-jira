@@ -61,11 +61,12 @@
 
 (ert-deftest org-jira-test-table-open-items ()
   (let ((text (org-jira-test--table #'org-jira-org-table-insert-open-items)))
-    (should (string-match-p "TST-1: Æble ø å" text))
-    (should (string-match-p "Pipe \\\\vert and \\[brackets\\]" text))
-    ;; every data row is a single-column row: exactly two pipes
-    (dolist (l (nthcdr 2 (split-string (string-trim text) "\n")))
-      (should (= 2 (cl-count ?| l))))))
+    (should (string-prefix-p "#+NAME: JiraItems\n| Key   | Title " text))
+    (should (string-match-p "| TST-1 | Æble ø å " text))
+    (should (string-match-p "| TST-2 | Pipe \\\\vert and \\[brackets\\] " text))
+    ;; every data row is a two-column row: exactly three pipes
+    (dolist (l (nthcdr 3 (split-string (string-trim text) "\n")))
+      (should (= 3 (cl-count ?| l))))))
 
 ;;; Export
 
@@ -92,14 +93,15 @@
   (let ((jira-epic-projects nil))
     (should-error (org-jira-query-get-epics) :type 'user-error)))
 
-(ert-deftest org-jira-test-epics-table-same-shape-as-open-items ()
+(ert-deftest org-jira-test-epics-table-same-columns-as-open-items ()
   (cl-letf (((symbol-function 'org-jira-query-get-epics) (lambda (&rest _) (org-jira-test-util-issues)))
             ((symbol-function 'org-jira-query-get-open-items) (lambda (&rest _) (org-jira-test-util-issues)))
             (jira-current-user-info '((displayName . "x"))))
     (let ((epics (with-temp-buffer (org-mode) (org-jira-insert-epics) (buffer-string)))
           (open (with-temp-buffer (org-mode) (org-jira-insert-org-table) (buffer-string))))
-      (should (equal epics (concat "#+NAME: jira-epics\n" open)))
-      (should (string-match-p "TST-1: Æble ø å" epics))
+      (should (equal (string-remove-prefix "#+NAME: jira-epics\n" epics)
+                     (string-remove-prefix "#+NAME: JiraItems\n" open)))
+      (should (string-match-p "| TST-1 | Æble ø å" epics))
       (should (string-match-p "Pipe \\\\vert and \\[brackets\\]" epics)))))
 
 (ert-deftest org-jira-test-table-inserted-below-point ()
@@ -113,7 +115,7 @@
       (org-jira-insert-epics)
       (let ((text (buffer-string)))
         ;; the line point was on is intact, the table follows it, then the rest
-        (should (string-match-p "\\`\\* Heading\nsome text here\n#\\+NAME: jira-epics\n| Jira +|\n" text))
+        (should (string-match-p "\\`\\* Heading\nsome text here\n#\\+NAME: jira-epics\n| Key +| Title +|\n" text))
         (should (string-suffix-p "|\n\nafter" text))))))
 
 (ert-deftest org-jira-test-table-at-line-start ()
@@ -123,7 +125,7 @@
       (org-mode)
       (insert "before\n")
       (org-jira-insert-epics)
-      (should (string-prefix-p "before\n#+NAME: jira-epics\n| Jira" (buffer-string))))))
+      (should (string-prefix-p "before\n#+NAME: jira-epics\n| Key" (buffer-string))))))
 
 (ert-deftest org-jira-test-no-epics-inserts-nothing ()
   (cl-letf (((symbol-function 'org-jira-query-get-epics) (lambda (&rest _) nil))
