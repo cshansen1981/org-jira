@@ -8,16 +8,24 @@
 (require 'org-jira-config)
 (require 'org-jira-api)
 
+(defconst org-jira-query-fields "summary"
+  "Comma-separated issue fields requested by searches.
+Only these are returned, instead of every field of every issue, which
+for issues with long descriptions (such as Epics) can make a page of
+results slow enough to time out.")
+
 (defun org-jira-query-search-jql (jql &optional start-at max-results)
   "Search Jira using JQL query.
 JQL is the query string.
 START-AT is the starting index (default 0).
-MAX-RESULTS is the maximum number of results (default `jira-max-results')."
+MAX-RESULTS is the maximum number of results (default `jira-max-results').
+Only `org-jira-query-fields' are returned for each issue."
   (let* ((encoded-jql (org-jira-api-url-encode jql))
          (start (or start-at 0))
          (max (or max-results jira-max-results))
-         (endpoint (format "/rest/api/2/search?jql=%s&startAt=%d&maxResults=%d"
-                           encoded-jql start max)))
+         (endpoint (format "/rest/api/2/search?jql=%s&startAt=%d&maxResults=%d&fields=%s"
+                           encoded-jql start max
+                           (org-jira-api-url-encode org-jira-query-fields))))
     (org-jira-api-request endpoint)))
 
 (defun org-jira-query-get-issues-with-jql (jql)

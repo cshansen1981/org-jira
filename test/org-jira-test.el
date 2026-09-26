@@ -72,6 +72,14 @@
 
 ;;; Epics
 
+(ert-deftest org-jira-test-search-requests-only-summary ()
+  (org-jira-test-util-with-api (org-jira-test-util-issues)
+    (org-jira-query-get-epics)
+    ;; every search request, count and pages alike, limits the fields
+    (should endpoints)
+    (dolist (e endpoints)
+      (should (string-match-p "&fields=summary\\'" e)))))
+
 (ert-deftest org-jira-test-epics-jql-default-projects ()
   (org-jira-test-util-with-api (org-jira-test-util-issues)
     (org-jira-query-get-epics)
