@@ -9,8 +9,10 @@
 ;; by its #+NAME: in `jira-epics-file', not in the buffer the command
 ;; is invoked in).  Either way, the heading becomes the issue summary
 ;; and the entry body its description, and the issue is assigned to
-;; the current Jira user.  The key of the new issue is stored in the
-;; heading's :KEY: property.
+;; the current Jira user.  An Original Estimate is prompted for (Jira
+;; makes it the Remaining Estimate too).  The key of the new issue is
+;; stored in the heading's :KEY: property and the estimate in
+;; :JiraEstimate:.
 
 ;;; Code:
 
@@ -144,47 +146,86 @@ that has not already been done."
     (user-error "Invalid Jira key %S" issue-key))
   (match-string 1 issue-key))
 
-(defun org-jira-task--base-fields (project-key issue-type summary description)
+(defun org-jira-task--normalize-estimate (string)
+  "Return the estimate STRING as a Jira duration, or nil if it is blank.
+STRING is either a Jira duration such as \"1w 2d 3h 30m\" or HH:MM
+(as used by Org clocks and `org-jira-worklog-log-work'), which becomes
+\"Hh Mm\".  Signal a `user-error' if STRING is neither, or is zero."
+  (let ((s (string-trim (or string ""))))
+    (cond
+     ((string-empty-p s) nil)
+     ((string-match "\\`\\([0-9]+\\):\\([0-9]\\{1,2\\}\\)\\'" s)
+      (let ((hours (string-to-number (match-string 1 s)))
+            (minutes (string-to-number (match-string 2 s))))
+        (when (>= minutes 60)
+          (user-error "Invalid estimate %S: minutes must be below 60" s))
+        (when (and (zerop hours) (zerop minutes))
+          (user-error "Estimate must be greater than zero"))
+        (string-join (delq nil (list (unless (zerop hours) (format "%dh" hours))
+                                     (unless (zerop minutes) (format "%dm" minutes))))
+                     " ")))
+     ((string-match-p "\\`\\([0-9]+[wdhm]\\)\\([ \t]+[0-9]+[wdhm]\\)*\\'" s)
+      (when (string-match-p "\\`\\(0+[wdhm][ \t]*\\)+\\'" s)
+        (user-error "Estimate must be greater than zero"))
+      (replace-regexp-in-string "[ \t]+" " " s))
+     (t (user-error "Invalid estimate %S, expected e.g. 2h 30m, 1d or HH:MM" s)))))
+
+(defun org-jira-task--read-estimate ()
+  "Prompt for an Original Estimate and return it as a Jira duration.
+Return nil if the answer is left blank."
+  (org-jira-task--normalize-estimate
+   (read-string "Original estimate (e.g. 2h 30m, 1d or HH:MM; blank for none): ")))
+
+(defun org-jira-task--base-fields (project-key issue-type summary description estimate)
   "Return the Jira issue-creation fields common to tasks and subtasks.
 PROJECT-KEY and ISSUE-TYPE name the project and issue type; SUMMARY is
-the issue summary and DESCRIPTION is optional.  The issue is assigned
-to the current Jira user."
+the issue summary.  DESCRIPTION and ESTIMATE (a Jira duration sent as
+the Original Estimate, which Jira also makes the Remaining Estimate)
+are optional.  The issue is assigned to the current Jira user."
   `((project . ((key . ,project-key)))
     (summary . ,summary)
     (issuetype . ((name . ,issue-type)))
     (assignee . ((name . ,(org-jira-task--current-username))))
-    ,@(when description `((description . ,description)))))
+    ,@(when description `((description . ,description)))
+    ,@(when estimate `((timetracking . ((originalEstimate . ,estimate)))))))
 
-(defun org-jira-task-create-issue (epic-key summary &optional description)
+(defun org-jira-task-create-issue (epic-key summary &optional description estimate)
   "Create a task titled SUMMARY under the Epic EPIC-KEY in Jira.
-DESCRIPTION is optional.  The project and issue type come from
-EPIC-KEY and `jira-task-issue-type'.  The issue is assigned to the
-current Jira user.  Return the response from Jira."
+DESCRIPTION and ESTIMATE (an Original Estimate as a Jira duration) are
+optional.  The project and issue type come from EPIC-KEY and
+`jira-task-issue-type'.  The issue is assigned to the current Jira
+user.  Return the response from Jira."
   (let ((project (org-jira-task--project-key epic-key)))
     (org-jira-api-request
      "/rest/api/2/issue" "POST"
-     `((fields . (,@(org-jira-task--base-fields project jira-task-issue-type summary description)
+     `((fields . (,@(org-jira-task--base-fields project jira-task-issue-type
+                                                summary description estimate)
                   (,(intern (org-jira-task--epic-link-field)) . ,epic-key)))))))
 
-(defun org-jira-task-create-subtask-issue (parent-key summary &optional description)
+(defun org-jira-task-create-subtask-issue (parent-key summary &optional description estimate)
   "Create a subtask titled SUMMARY under the issue PARENT-KEY in Jira.
-DESCRIPTION is optional.  The project comes from PARENT-KEY and the
-issue type from `jira-subtask-issue-type'.  The issue is assigned to
-the current Jira user.  Return the response from Jira."
+DESCRIPTION and ESTIMATE (an Original Estimate as a Jira duration) are
+optional.  The project comes from PARENT-KEY and the issue type from
+`jira-subtask-issue-type'.  The issue is assigned to the current Jira
+user.  Return the response from Jira."
   (let ((project (org-jira-task--project-key parent-key)))
     (org-jira-api-request
      "/rest/api/2/issue" "POST"
-     `((fields . (,@(org-jira-task--base-fields project jira-subtask-issue-type summary description)
+     `((fields . (,@(org-jira-task--base-fields project jira-subtask-issue-type
+                                                summary description estimate)
                   (parent . ((key . ,parent-key)))))))))
 
-(defun org-jira-task--finish (response what)
+(defun org-jira-task--finish (response what estimate)
   "Store the key from Jira RESPONSE in the :KEY: property at point.
-WHAT names the kind of issue, for the error when RESPONSE has no key.
+Also store ESTIMATE, if non-nil, in the :JiraEstimate: property.  WHAT
+names the kind of issue, for the error when RESPONSE has no key.
 Return the key."
   (let ((key (alist-get 'key response)))
     (unless key
       (error "Jira did not return a key for the new %s" what))
     (org-entry-put nil "KEY" key)
+    (when estimate
+      (org-entry-put nil "JiraEstimate" estimate))
     key))
 
 ;;;###autoload
@@ -197,9 +238,12 @@ those listed in `jira-epics-file' by `org-jira-insert-epics' and
 create a task under it.  Either way, the heading is the summary and
 the entry body the description; if the entry has no body,
 `org-jira-task-empty-body-description' is sent instead, since Jira may
-require a non-empty description.  The issue is assigned to the
-current Jira user.  The key of the created issue is written to the
-heading's :KEY: property."
+require a non-empty description.  An Original Estimate is prompted
+for (see `org-jira-task--normalize-estimate' for the format; blank for
+none), which Jira also makes the Remaining Estimate.  The issue is
+assigned to the current Jira user.  The key of the created issue is
+written to the heading's :KEY: property and the estimate to its
+:JiraEstimate: property."
   (interactive)
   (unless (and (derived-mode-p 'org-mode) (org-at-heading-p))
     (user-error "Point must be on an Org heading"))
@@ -212,15 +256,17 @@ heading's :KEY: property."
     (let ((description (or (org-jira-task--body) org-jira-task-empty-body-description))
           (parent (org-jira-task--parent-key)))
       (if parent
-          (let ((key (org-jira-task--finish
-                      (org-jira-task-create-subtask-issue parent summary description)
-                      "subtask")))
+          (let* ((estimate (org-jira-task--read-estimate))
+                 (key (org-jira-task--finish
+                       (org-jira-task-create-subtask-issue parent summary description estimate)
+                       "subtask" estimate)))
             (message "Created %s as a subtask of %s" key parent)
             key)
         (let* ((epic (org-jira-task--read-epic))
+               (estimate (org-jira-task--read-estimate))
                (key (org-jira-task--finish
-                     (org-jira-task-create-issue epic summary description)
-                     "task")))
+                     (org-jira-task-create-issue epic summary description estimate)
+                     "task" estimate)))
           (message "Created %s under %s" key epic)
           key)))))
 

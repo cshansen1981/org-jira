@@ -13,10 +13,15 @@
 | REZ-22 | Pipe \\vert x |
 ")
 
+(defvar org-jira-task-test--estimate-input ""
+  "What the stubbed `read-string' answers to the estimate prompt.")
+
 (defmacro org-jira-task-test-with-buffer (text &rest body)
   "Run BODY in an Org buffer containing TEXT, point at the buffer start.
 `jira-current-user-info' is pre-populated so that BODY does not
-trigger a connection test unless it rebinds it to nil itself."
+trigger a connection test unless it rebinds it to nil itself.
+`read-string' answers `org-jira-task-test--estimate-input' (default
+blank, i.e. no estimate)."
   (declare (indent 1))
   `(with-temp-buffer
      (org-mode)
@@ -27,7 +32,9 @@ trigger a connection test unless it rebinds it to nil itself."
            (jira-task-issue-type "Task")
            (jira-subtask-issue-type "Sub-task")
            (jira-current-user-info '((name . "csh") (displayName . "Christoffer Hansen"))))
-       ,@body)))
+       (cl-letf (((symbol-function 'read-string)
+                  (lambda (&rest _) org-jira-task-test--estimate-input)))
+         ,@body))))
 
 (defmacro org-jira-task-test-with-epics-file (content &rest body)
   "Run BODY with `jira-epics-file' bound to a temp file holding CONTENT.
@@ -176,6 +183,28 @@ Each call's argument list is pushed on the variable `calls'."
   (org-jira-task-test-with-buffer "* Task\n:PROPERTIES:\n:A: b\n:END:\n"
     (should (null (org-jira-task--body)))))
 
+;;; Estimate
+
+(ert-deftest org-jira-task-test-normalize-estimate-jira-duration ()
+  (should (equal (org-jira-task--normalize-estimate "2h") "2h"))
+  (should (equal (org-jira-task--normalize-estimate " 1w  2d 3h\t30m ") "1w 2d 3h 30m"))
+  (should (equal (org-jira-task--normalize-estimate "0d 4h") "0d 4h")))
+
+(ert-deftest org-jira-task-test-normalize-estimate-hhmm ()
+  (should (equal (org-jira-task--normalize-estimate "2:30") "2h 30m"))
+  (should (equal (org-jira-task--normalize-estimate "02:00") "2h"))
+  (should (equal (org-jira-task--normalize-estimate "0:45") "45m"))
+  (should (equal (org-jira-task--normalize-estimate "10:05") "10h 5m")))
+
+(ert-deftest org-jira-task-test-normalize-estimate-blank ()
+  (should (null (org-jira-task--normalize-estimate "")))
+  (should (null (org-jira-task--normalize-estimate "  ")))
+  (should (null (org-jira-task--normalize-estimate nil))))
+
+(ert-deftest org-jira-task-test-normalize-estimate-invalid ()
+  (dolist (s '("2" "abc" "2x" "1:60" "0:00" "0h" "0d 0m" "2h30" "h2"))
+    (should-error (org-jira-task--normalize-estimate s) :type 'user-error)))
+
 ;;; Epic Link field
 
 (ert-deftest org-jira-task-test-field-explicit ()
@@ -216,6 +245,21 @@ Each call's argument list is pushed on the variable `calls'."
         (should (equal (alist-get 'name (alist-get 'assignee fields)) "csh"))
         (should (equal (alist-get 'customfield_10014 fields) "SITE-1"))
         (should (equal (alist-get 'description fields) "Desc"))))))
+
+(ert-deftest org-jira-task-test-create-issue-with-estimate ()
+  (org-jira-task-test-with-buffer ""
+    (org-jira-task-test-with-api '((key . "SITE-7"))
+      (org-jira-task-create-issue "SITE-1" "Sum" "Desc" "2h 30m")
+      (let ((fields (alist-get 'fields (nth 2 (car calls)))))
+        ;; only the Original Estimate is sent; Jira derives the Remaining
+        (should (equal (alist-get 'timetracking fields)
+                       '((originalEstimate . "2h 30m"))))))))
+
+(ert-deftest org-jira-task-test-create-issue-without-estimate ()
+  (org-jira-task-test-with-buffer ""
+    (org-jira-task-test-with-api '((key . "SITE-7"))
+      (org-jira-task-create-issue "SITE-1" "Sum" "Desc")
+      (should-not (assq 'timetracking (alist-get 'fields (nth 2 (car calls))))))))
 
 (ert-deftest org-jira-task-test-create-issue-tests-connection-when-username-unset ()
   (org-jira-task-test-with-buffer ""
@@ -276,6 +320,13 @@ Each call's argument list is pushed on the variable `calls'."
         (should (equal (alist-get 'description fields) "Desc"))
         ;; subtasks are not linked to an Epic directly, unlike tasks
         (should-not (assq 'customfield_10014 fields))))))
+
+(ert-deftest org-jira-task-test-create-subtask-issue-with-estimate ()
+  (org-jira-task-test-with-buffer ""
+    (org-jira-task-test-with-api '((key . "SITE-8"))
+      (org-jira-task-create-subtask-issue "SITE-7" "Sub" "Desc" "1d")
+      (should (equal (alist-get 'timetracking (alist-get 'fields (nth 2 (car calls))))
+                     '((originalEstimate . "1d")))))))
 
 (ert-deftest org-jira-task-test-create-subtask-issue-without-description ()
   (org-jira-task-test-with-buffer ""
@@ -349,6 +400,54 @@ Each call's argument list is pushed on the variable `calls'."
           (should (equal (alist-get 'name (alist-get 'issuetype fields)) "Sub-task"))
           (should (equal (alist-get 'name (alist-get 'assignee fields)) "csh")))
         (should (equal (org-entry-get nil "KEY") "SITE-8"))))))
+
+(ert-deftest org-jira-task-test-command-estimate-sent-and-stored ()
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (let ((org-jira-task-test--estimate-input "1:30"))
+      (org-jira-task-test-with-buffer org-jira-task-test--doc
+        (org-jira-task-test--goto "* TODO Write")
+        (org-jira-task-test-with-api '((key . "SITE-42"))
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_p coll &rest _) (car coll))))
+            (org-jira-task-create))
+          (should (equal (alist-get 'timetracking (alist-get 'fields (nth 2 (car calls))))
+                         '((originalEstimate . "1h 30m"))))
+          (should (equal (org-entry-get nil "KEY") "SITE-42"))
+          (should (equal (org-entry-get nil "JiraEstimate") "1h 30m")))))))
+
+(ert-deftest org-jira-task-test-command-subtask-estimate-sent-and-stored ()
+  (let ((org-jira-task-test--estimate-input "4h"))
+    (org-jira-task-test-with-buffer
+        "* Parent\n:PROPERTIES:\n:KEY: SITE-7\n:END:\n** Child task\n"
+      (org-jira-task-test--goto "** Child")
+      (org-jira-task-test-with-api '((key . "SITE-8"))
+        (org-jira-task-create)
+        (should (equal (alist-get 'timetracking (alist-get 'fields (nth 2 (car calls))))
+                       '((originalEstimate . "4h"))))
+        (should (equal (org-entry-get nil "JiraEstimate") "4h"))))))
+
+(ert-deftest org-jira-task-test-command-blank-estimate-sends-and-stores-nothing ()
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (org-jira-task-test-with-buffer org-jira-task-test--doc
+      (org-jira-task-test--goto "* TODO Write")
+      (org-jira-task-test-with-api '((key . "SITE-42"))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_p coll &rest _) (car coll))))
+          (org-jira-task-create))
+        (should-not (assq 'timetracking (alist-get 'fields (nth 2 (car calls)))))
+        (should-not (org-entry-get nil "JiraEstimate"))))))
+
+(ert-deftest org-jira-task-test-command-invalid-estimate-makes-no-request ()
+  (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
+    (let ((org-jira-task-test--estimate-input "soon"))
+      (org-jira-task-test-with-buffer org-jira-task-test--doc
+        (org-jira-task-test--goto "* TODO Write")
+        (org-jira-task-test-with-api '((key . "SITE-42"))
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_p coll &rest _) (car coll))))
+            (should-error (org-jira-task-create) :type 'user-error))
+          (should (null calls))
+          (should-not (org-entry-get nil "KEY")))))))
 
 (ert-deftest org-jira-task-test-command-requires-heading ()
   (org-jira-task-test-with-epics-file org-jira-task-test--epics-table
@@ -426,6 +525,15 @@ Each call's argument list is pushed on the variable `calls'."
         (should (equal (alist-get 'description fields) "Beskrivelse æøå"))
         (should (equal (alist-get 'customfield_10777 fields) "SITE-1"))
         (should (equal (alist-get 'key (alist-get 'project fields)) "SITE"))))))
+
+(ert-deftest org-jira-task-http-test-estimate-reaches-server ()
+  (org-jira-http-test-with-server
+    (org-jira-task-test-with-buffer ""
+      (let* ((jira-epic-link-field nil)
+             (resp (org-jira-task-create-issue "SITE-1" "Sum" "Desc" "2h 30m"))
+             (fields (alist-get 'fields (alist-get 'received resp))))
+        (should (equal (alist-get 'originalEstimate (alist-get 'timetracking fields))
+                       "2h 30m"))))))
 
 (ert-deftest org-jira-task-http-test-subtask-end-to-end ()
   ;; no jira-epic-link-field / discovery override needed: a subtask
